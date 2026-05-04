@@ -4,14 +4,21 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls">
     <Application.Resources>
-        <ResourceDictionary>
-            <ResourceDictionary.MergedDictionaries>
-                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
-            </ResourceDictionary.MergedDictionaries>
-
-            <!-- 让 TabView 内容区背景透明，透出 Mica/Acrylic 材质 -->
-            <!-- TabContentPresenter 用的是 TabViewItemHeaderBackgroundSelected 作为背景 -->
-            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="Transparent"/>
-        </ResourceDictionary>
+        <muxc:XamlControlsResources>
+            <muxc:XamlControlsResources.MergedDictionaries>
+                <ResourceDictionary>
+                    <ResourceDictionary.ThemeDictionaries>
+                        <ResourceDictionary x:Key="Light">
+                            <!-- LayerFillColorDefault on Mica: 50% white -->
+                            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="#80FFFFFF"/>
+                        </ResourceDictionary>
+                        <ResourceDictionary x:Key="Dark">
+                            <!-- LayerFillColorDefault on Mica: ~30% dark -->
+                            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="#4C3A3A3A"/>
+                        </ResourceDictionary>
+                    </ResourceDictionary.ThemeDictionaries>
+                </ResourceDictionary>
+            </muxc:XamlControlsResources.MergedDictionaries>
+        </muxc:XamlControlsResources>
     </Application.Resources>
 </Application>
