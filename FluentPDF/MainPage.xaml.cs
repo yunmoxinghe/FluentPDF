@@ -14,19 +14,25 @@ using Windows.UI.Xaml.Navigation;
 
 namespace FluentPDF
 {
+    // ── 设计原则 ──────────────────────────────────────────────────────────
+    // 页面 Grid 的 Width/Height 始终等于 OriginalSize（原始 PDF 尺寸，单位 px）。
+    // 缩放完全由 ScrollViewer.ZoomFactor 驱动，系统自动保持视口中心位置，
+    // 不需要任何手动偏移计算，彻底消除位置闪烁。
+    //
+    // 渲染分辨率 = OriginalSize * ZoomFactor，在 ZoomFactor 稳定后（ViewChanged
+    // IsIntermediate=false）按当前 ZoomFactor 重新渲染高清位图。
+    // ─────────────────────────────────────────────────────────────────────
+
     public sealed partial class MainPage : Page
     {
         private readonly ObservableCollection<PdfPageItem> _pages = new();
         private PdfDocument? _doc;
         private CancellationTokenSource? _renderCts;
 
-        // 当前缩放倍率（1.0 = 原始尺寸）
-        private double _zoom = 1.0;
-        private double _lastRenderedZoom = 1.0; // 上次渲染时的缩放倍率
+        // ScrollViewer.ZoomFactor 就是缩放倍率，不再维护单独的 _zoom
         private const double ZoomStep = 0.25;
         private const double ZoomMin = 0.25;
         private const double ZoomMax = 4.0;
-        private const double PageMargin = 16.0; // 与 XAML Margin 一致
 
         public MainPage()
         {
@@ -36,12 +42,14 @@ namespace FluentPDF
             SetupTitleBar();
         }
 
+        private void PdfScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            PagesHost.MinWidth = PdfScrollViewer.ViewportWidth / PdfScrollViewer.ZoomFactor;
+        }
+
         private void SetupTitleBar()
         {
-            // 注册可拖动区域
             Window.Current.SetTitleBar(TitleBarArea);
-
-            // 同步标题栏高度（DPI 变化时也跟着更新）
             var coreTitleBar = Windows.ApplicationModel.Core.CoreApplication.GetCurrentView().TitleBar;
             TitleBarRow.Height = new Windows.UI.Xaml.GridLength(coreTitleBar.Height > 0 ? coreTitleBar.Height : 32);
             coreTitleBar.LayoutMetricsChanged += (s, _) =>
@@ -93,27 +101,27 @@ namespace FluentPDF
 
                 _doc = doc;
 
-                // 适合宽度：初始缩放让第一页填满视口
+                // 计算初始 ZoomFactor：让第一页填满视口宽度
                 double viewportWidth = PdfScrollViewer.ActualWidth > 0
                     ? PdfScrollViewer.ActualWidth : ActualWidth;
 
+                float initialZoom = 1.0f;
                 using (var firstPage = doc.GetPage(0))
                 {
-                    _zoom = viewportWidth > 0
-                        ? Math.Clamp(viewportWidth / firstPage.Size.Width, ZoomMin, ZoomMax)
-                        : 1.0;
+                    if (viewportWidth > 0 && firstPage.Size.Width > 0)
+                        initialZoom = (float)Math.Clamp(
+                            viewportWidth / firstPage.Size.Width, ZoomMin, ZoomMax);
                 }
 
-                // 填充占位符（只存原始尺寸，不渲染位图）
+                // 页面 Grid 尺寸 = 原始 PDF 尺寸（ZoomFactor 负责视觉缩放）
                 for (uint i = 0; i < doc.PageCount; i++)
                 {
                     using PdfPage page = doc.GetPage(i);
                     _pages.Add(new PdfPageItem
                     {
                         PageIndex = i,
-                        OriginalWidth = page.Size.Width,
-                        OriginalHeight = page.Size.Height,
-                        Zoom = _zoom
+                        DisplayWidth = page.Size.Width,
+                        DisplayHeight = page.Size.Height,
                     });
                 }
 
@@ -121,7 +129,8 @@ namespace FluentPDF
                 PdfScrollViewer.Visibility = Visibility.Visible;
                 Toolbar.Visibility = Visibility.Visible;
 
-                await RenderVisiblePagesAsync();
+                // 设置初始缩放（触发 ViewChanged → RenderVisiblePagesAsync）
+                PdfScrollViewer.ChangeView(null, null, initialZoom, disableAnimation: true);
             }
             catch (Exception ex)
             {
@@ -139,58 +148,26 @@ namespace FluentPDF
 
         // ── 缩放控件 ──────────────────────────────────────────────────────
 
-        private async void ZoomInButton_Click(object sender, RoutedEventArgs e)
-            => await SetZoomAsync(Math.Min(_zoom + ZoomStep, ZoomMax));
-
-        private async void ZoomOutButton_Click(object sender, RoutedEventArgs e)
-            => await SetZoomAsync(Math.Max(_zoom - ZoomStep, ZoomMin));
-
-        private async void ZoomFitButton_Click(object sender, RoutedEventArgs e)
+        private void ZoomInButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_pages.Count == 0) return;
-            double fit = Math.Clamp(
-                PdfScrollViewer.ActualWidth / _pages[0].OriginalWidth, ZoomMin, ZoomMax);
-            await SetZoomAsync(fit);
+            float cur = PdfScrollViewer.ZoomFactor;
+            float next = (float)Math.Min(Math.Round(cur / ZoomStep + 1) * ZoomStep, ZoomMax);
+            PdfScrollViewer.ChangeView(null, null, next, disableAnimation: true);
         }
 
-        private async Task SetZoomAsync(double newZoom)
+        private void ZoomOutButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_doc == null || Math.Abs(newZoom - _zoom) < 0.001) return;
+            float cur = PdfScrollViewer.ZoomFactor;
+            float next = (float)Math.Max(Math.Round(cur / ZoomStep - 1) * ZoomStep, ZoomMin);
+            PdfScrollViewer.ChangeView(null, null, next, disableAnimation: true);
+        }
 
-            // 记录缩放前视口中心点的相对位置（百分比）
-            double oldZoom = _zoom;
-            double centerXRatio = 0.5, centerYRatio = 0.5;
-
-            if (PdfScrollViewer.ScrollableWidth > 0)
-                centerXRatio = (PdfScrollViewer.HorizontalOffset + PdfScrollViewer.ViewportWidth / 2)
-                    / (PdfScrollViewer.ExtentWidth);
-
-            if (PdfScrollViewer.ScrollableHeight > 0)
-                centerYRatio = (PdfScrollViewer.VerticalOffset + PdfScrollViewer.ViewportHeight / 2)
-                    / (PdfScrollViewer.ExtentHeight);
-
-            _zoom = newZoom;
-            _lastRenderedZoom = _zoom;
-
-            // 更新尺寸但保留旧位图
-            foreach (var p in _pages)
-            {
-                p.Zoom = _zoom;
-                p.NeedsRerender = true;
-            }
-
-            // 等待布局更新
-            PagesControl.UpdateLayout();
-
-            // 恢复到相同的相对位置
-            double newCenterX = centerXRatio * PdfScrollViewer.ExtentWidth;
-            double newCenterY = centerYRatio * PdfScrollViewer.ExtentHeight;
-            double newOffsetX = newCenterX - PdfScrollViewer.ViewportWidth / 2;
-            double newOffsetY = newCenterY - PdfScrollViewer.ViewportHeight / 2;
-
-            PdfScrollViewer.ChangeView(newOffsetX, newOffsetY, (float)_zoom, true);
-
-            await RenderVisiblePagesAsync();
+        private void ZoomFitButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_pages.Count == 0) return;
+            float fit = (float)Math.Clamp(
+                PdfScrollViewer.ActualWidth / _pages[0].DisplayWidth, ZoomMin, ZoomMax);
+            PdfScrollViewer.ChangeView(null, null, fit, disableAnimation: true);
         }
 
         // ── 按需渲染 ──────────────────────────────────────────────────────
@@ -198,23 +175,6 @@ namespace FluentPDF
         private async void OnViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
         {
             if (e.IsIntermediate) return;
-
-            float svZoom = PdfScrollViewer.ZoomFactor;
-            double newZoom = Math.Clamp(svZoom, ZoomMin, ZoomMax);
-
-            if (Math.Abs(newZoom - _lastRenderedZoom) > 0.05)
-            {
-                _zoom = newZoom;
-                // 触摸板手势：ScrollViewer 已维护好位置，只更新渲染分辨率
-                // 不调用 ChangeView，避免位置跳动
-                foreach (var p in _pages)
-                {
-                    p.Zoom = _zoom;
-                    p.NeedsRerender = true;
-                }
-                _lastRenderedZoom = _zoom;
-            }
-
             await RenderVisiblePagesAsync();
         }
 
@@ -226,15 +186,19 @@ namespace FluentPDF
             _renderCts = new CancellationTokenSource();
             var token = _renderCts.Token;
 
-            double viewTop = PdfScrollViewer.VerticalOffset / PdfScrollViewer.ZoomFactor;
-            double viewBottom = viewTop + PdfScrollViewer.ViewportHeight / PdfScrollViewer.ZoomFactor;
+            float zoom = PdfScrollViewer.ZoomFactor;
 
-            // 按缩放后高度累加定位每页
+            // 视口在内容坐标系中的范围（内容坐标 = 像素 / ZoomFactor）
+            double viewTop = PdfScrollViewer.VerticalOffset / zoom;
+            double viewBottom = viewTop + PdfScrollViewer.ViewportHeight / zoom;
+
+            // 按 DisplayHeight（原始尺寸）累加定位每页
             double y = 0;
+            const double margin = 8.0; // 与 XAML Margin="8,8,8,8" 一致
             int firstVisible = -1, lastVisible = -1;
             for (int i = 0; i < _pages.Count; i++)
             {
-                double pageBottom = y + _pages[i].RenderedHeight + PageMargin;
+                double pageBottom = y + _pages[i].DisplayHeight + margin * 2;
                 if (pageBottom >= viewTop && y <= viewBottom)
                 {
                     if (firstVisible < 0) firstVisible = i;
@@ -252,15 +216,20 @@ namespace FluentPDF
             {
                 if (token.IsCancellationRequested) return;
                 var item = _pages[i];
-                if (item.PageImage != null && !item.NeedsRerender) continue;
+
+                // 只在缩放变化超过阈值时重渲染，避免微小滚动触发不必要的渲染
+                if (item.PageImage != null &&
+                    Math.Abs(zoom - item.RenderedAtZoom) < 0.05f) continue;
 
                 try
                 {
                     using PdfPage page = _doc.GetPage(item.PageIndex);
+                    uint w = (uint)Math.Max(1, Math.Round(item.DisplayWidth * zoom));
+                    uint h = (uint)Math.Max(1, Math.Round(item.DisplayHeight * zoom));
                     var opts = new PdfPageRenderOptions
                     {
-                        DestinationWidth = (uint)item.RenderedWidth,
-                        DestinationHeight = (uint)item.RenderedHeight
+                        DestinationWidth = w,
+                        DestinationHeight = h
                     };
                     var stream = new InMemoryRandomAccessStream();
                     await page.RenderToStreamAsync(stream, opts);
@@ -268,9 +237,9 @@ namespace FluentPDF
 
                     var bitmap = new BitmapImage();
                     await bitmap.SetSourceAsync(stream);
-                    // 渲染完成后原子替换，旧图一直显示到新图就绪
-                    item.PageImage = bitmap;
-                    item.NeedsRerender = false;
+                    if (token.IsCancellationRequested) return;
+
+                    item.SetImage(bitmap, zoom);
                 }
                 catch (OperationCanceledException) { return; }
                 catch { /* 单页失败不影响其他页 */ }
@@ -281,33 +250,19 @@ namespace FluentPDF
     public sealed class PdfPageItem : INotifyPropertyChanged
     {
         public uint PageIndex { get; set; }
-        public double OriginalWidth { get; set; }
-        public double OriginalHeight { get; set; }
 
-        // 标记需要按新分辨率重渲染（但保留旧图，不闪灰）
-        public bool NeedsRerender { get; set; }
+        // 页面 Grid 的固定尺寸（原始 PDF 尺寸），不随缩放变化
+        public double DisplayWidth { get; set; }
+        public double DisplayHeight { get; set; }
 
-        private double _zoom = 1.0;
-        public double Zoom
-        {
-            get => _zoom;
-            set
-            {
-                _zoom = value;
-                OnPropertyChanged(nameof(Zoom));
-                OnPropertyChanged(nameof(RenderedWidth));
-                OnPropertyChanged(nameof(RenderedHeight));
-            }
-        }
-
-        public double RenderedWidth => Math.Round(OriginalWidth * _zoom);
-        public double RenderedHeight => Math.Round(OriginalHeight * _zoom);
+        // 记录当前位图是在哪个 ZoomFactor 下渲染的
+        public float RenderedAtZoom { get; private set; } = 0f;
 
         private BitmapImage? _pageImage;
         public BitmapImage? PageImage
         {
             get => _pageImage;
-            set
+            private set
             {
                 _pageImage = value;
                 OnPropertyChanged(nameof(PageImage));
@@ -315,8 +270,13 @@ namespace FluentPDF
             }
         }
 
-        // 只在从未渲染过时显示进度环，缩放重渲染时不显示
         public bool IsFirstLoad => _pageImage == null;
+
+        public void SetImage(BitmapImage bitmap, float zoom)
+        {
+            RenderedAtZoom = zoom;
+            PageImage = bitmap;
+        }
 
         public event PropertyChangedEventHandler? PropertyChanged;
         private void OnPropertyChanged(string name)

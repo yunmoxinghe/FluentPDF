@@ -72,7 +72,8 @@
                       HorizontalScrollBarVisibility="Auto"
                       ZoomMode="Enabled"
                       MinZoomFactor="0.25"
-                      MaxZoomFactor="4.0">
+                      MaxZoomFactor="4.0"
+                      SizeChanged="PdfScrollViewer_SizeChanged">
             <Grid x:Name="PagesHost">
                 <ItemsControl x:Name="PagesControl" HorizontalAlignment="Center">
                     <ItemsControl.ItemsPanel>
@@ -83,8 +84,8 @@
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="local:PdfPageItem">
                             <Grid Margin="8,8,8,8"
-                                  Width="{x:Bind RenderedWidth, Mode=OneWay}"
-                                  Height="{x:Bind RenderedHeight, Mode=OneWay}"
+                                  Width="{x:Bind DisplayWidth, Mode=OneWay}"
+                                  Height="{x:Bind DisplayHeight, Mode=OneWay}"
                                   Background="{ThemeResource SystemControlBackgroundBaseLowBrush}">
                                 <ProgressRing IsActive="{x:Bind IsFirstLoad, Mode=OneWay}"
                                               Width="32" Height="32"
@@ -93,8 +94,8 @@
                                 <Image Source="{x:Bind PageImage, Mode=OneWay}"
                                        Stretch="Fill"/>
                                 <InkCanvas x:Name="PageInkCanvas"
-                                           Width="{x:Bind RenderedWidth, Mode=OneWay}"
-                                           Height="{x:Bind RenderedHeight, Mode=OneWay}"/>
+                                           Width="{x:Bind DisplayWidth, Mode=OneWay}"
+                                           Height="{x:Bind DisplayHeight, Mode=OneWay}"/>
                             </Grid>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
