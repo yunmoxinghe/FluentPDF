@@ -42,7 +42,7 @@ namespace FluentPDF.Pages
         public static readonly RenderProfile LowEnd = new()
         {
             Name                 = "流畅（低性能设备）",
-            ResolutionScaleSlow  = 0.85,  // 停止后也不全分辨率，最多 0.85x
+            ResolutionScaleSlow  = 1.0,   // 停止后渲染全分辨率
             ResolutionScaleFast  = 0.5,   // 快速滚动 0.5x
             PreloadAhead         = 1,     // 只预加载滚动方向下一页
             PreloadBehind        = 0,     // 反方向不预加载
@@ -227,8 +227,14 @@ namespace FluentPDF.Pages
                 LowEndToggle.IsChecked     = IsLowEndMode;
                 PdfScrollViewer.ChangeView(null, null, initialZoom, disableAnimation: true);
 
-                // 立即渲染可见区高分辨率
-                ScheduleLayer2();
+                // 等布局走完一帧再渲染，此时 ViewportHeight 已就绪，GetVisibleRange 能拿到正确范围
+                // 避免 Visibility 刚变 Visible 时 ViewportHeight=0 导致 Layer2 直接跳过、出现一帧模糊
+                void OnFirstLayout(object? s, object _)
+                {
+                    PdfScrollViewer.LayoutUpdated -= OnFirstLayout;
+                    ScheduleLayer2();
+                }
+                PdfScrollViewer.LayoutUpdated += OnFirstLayout;
 
                 // 后台补全剩余页元数据
                 if (doc.PageCount > 1)

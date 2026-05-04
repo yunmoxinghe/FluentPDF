@@ -130,9 +130,6 @@ namespace FluentPDF
 
         private void UpdateTitleBarInsets(CoreApplicationViewTitleBar coreTitleBar)
         {
-            // 不强制设置高度，让 CustomDragRegion / ShellTitlebarInset
-            // 自然撑满 TabStripFooter / TabStripHeader 的实际高度（约48px）。
-            // coreTitleBar.Height（32px）只用于计算 inset 宽度。
             ShellTitlebarInset.MinHeight = coreTitleBar.Height;
             CustomDragRegion.MinHeight   = coreTitleBar.Height;
 
@@ -146,6 +143,22 @@ namespace FluentPDF
                 CustomDragRegion.MinWidth   = coreTitleBar.SystemOverlayLeftInset;
                 ShellTitlebarInset.MinWidth = coreTitleBar.SystemOverlayRightInset;
             }
+
+            // TabView 的默认样式通过 Padding="{ThemeResource TabViewHeaderPadding}"
+            // 在标签栏顶部加了 8px，用于窗口化时避免内容被系统边框遮挡。
+            // 最大化时不需要这个补偿，直接将 Padding 顶部清零。
+            var appView = Windows.UI.ViewManagement.ApplicationView.GetForCurrentView();
+            bool isMaximized = appView.IsFullScreenMode || IsWindowMaximized();
+            PdfTabView.Padding = isMaximized
+                ? new Thickness(0)
+                : new Thickness(0, 8, 0, 0);
+        }
+
+        private static bool IsWindowMaximized()
+        {
+            // UWP 中最大化窗口会同时贴近左右显示边缘
+            var appView = Windows.UI.ViewManagement.ApplicationView.GetForCurrentView();
+            return appView.AdjacentToLeftDisplayEdge && appView.AdjacentToRightDisplayEdge;
         }
 
         // ── 从 App.OnFileActivated 调用 ───────────────────────────
@@ -191,7 +204,7 @@ namespace FluentPDF
             var tab = new TabViewItem
             {
                 Header = GetString("Tab_Welcome"),
-                IconSource = new Microsoft.UI.Xaml.Controls.SymbolIconSource { Symbol = Symbol.Document },
+                IconSource = new Microsoft.UI.Xaml.Controls.SymbolIconSource { Symbol = Symbol.Home },
                 IsClosable = false,
                 Content = welcome
             };

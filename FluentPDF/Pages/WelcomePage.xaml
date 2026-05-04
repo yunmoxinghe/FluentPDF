@@ -4,9 +4,11 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:CommunityToolkit.WinUI.Controls"
     xmlns:ui="using:CommunityToolkit.WinUI"
-    Background="Transparent"
-    DoubleTapped="Page_DoubleTapped">
+    Background="Transparent">
 
+    <Grid Background="#01000000"
+          IsHitTestVisible="True"
+          DoubleTapped="Page_DoubleTapped">
     <StackPanel HorizontalAlignment="Center"
                 VerticalAlignment="Center"
                 Spacing="16"
@@ -29,4 +31,5 @@
                                Click="SettingsButton_Click"
                                HeaderIcon="{ui:FontIcon Glyph=&#xE713;}"/>
     </StackPanel>
+    </Grid>
 </Page>

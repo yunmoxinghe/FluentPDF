@@ -38,11 +38,11 @@
   <data name="NavItem_Viewer.Content" xml:space="preserve"><value>PDF 查看器</value></data>
 
   <!-- 标签页 -->
-  <data name="Tab_Welcome" xml:space="preserve"><value>欢迎</value></data>
+  <data name="Tab_Welcome" xml:space="preserve"><value>首页</value></data>
   <data name="OpenFileButton.Content" xml:space="preserve"><value>打开文件</value></data>
 
   <!-- 欢迎页 -->
-  <data name="Welcome_Title.Text" xml:space="preserve"><value>打开一个 PDF 文件以开始阅读</value></data>
+  <data name="Welcome_Title.Text" xml:space="preserve"><value>随处双击或拖动文件以阅读</value></data>
   <data name="Welcome_OpenButton.Content" xml:space="preserve"><value>选择文件</value></data>
   <data name="Welcome_SettingsButton.Content" xml:space="preserve"><value>设置</value></data>
   <data name="Welcome_OpenCard.Header" xml:space="preserve"><value>选择文件</value></data>

@@ -9,7 +9,7 @@
   <Identity
     Name="8B8CC4F4.EasePDF"
     Publisher="CN=A19C62A9-1AA6-44AB-9F57-2DE6C380D9C9"
-    Version="1.0.0.0" />
+    Version="1.0.5.0" />
 
   <mp:PhoneIdentity PhoneProductId="23241dd9-1fb2-45e5-a76e-8754c600b50a" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
