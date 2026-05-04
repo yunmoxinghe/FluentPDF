@@ -15,5 +15,8 @@ namespace FluentPDF.Pages
 
         private void OpenButton_Click(object sender, RoutedEventArgs e)
             => OpenFileRequested?.Invoke(this, EventArgs.Empty);
+
+        private void SettingsButton_Click(object sender, RoutedEventArgs e)
+            => MainPage.Instance?.OpenSettingsTab();
     }
 }

@@ -99,6 +99,31 @@ namespace FluentPDF
             if (file != null) OpenFileInNewTab(file);
         }
 
+        // ── 设置标签 ──────────────────────────────────────────────
+
+        public void OpenSettingsTab()
+        {
+            // 如果已有设置标签，直接切换到它
+            foreach (var item in PdfTabView.TabItems)
+            {
+                if (item is TabViewItem existing && existing.Content is Pages.SettingsPage)
+                {
+                    PdfTabView.SelectedItem = existing;
+                    return;
+                }
+            }
+
+            var tab = new TabViewItem
+            {
+                Header = GetString("Settings_Breadcrumb"),
+                IconSource = new Microsoft.UI.Xaml.Controls.SymbolIconSource { Symbol = Symbol.Setting },
+                IsClosable = true,
+                Content = new Pages.SettingsPage()
+            };
+            PdfTabView.TabItems.Add(tab);
+            PdfTabView.SelectedItem = tab;
+        }
+
         // ── 标签管理 ──────────────────────────────────────────────
 
         private void AddWelcomeTab()

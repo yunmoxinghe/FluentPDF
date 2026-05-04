@@ -44,6 +44,7 @@
   <!-- 欢迎页 -->
   <data name="Welcome_Title.Text" xml:space="preserve"><value>打开一个 PDF 文件以开始阅读</value></data>
   <data name="Welcome_OpenButton.Content" xml:space="preserve"><value>选择文件</value></data>
+  <data name="Welcome_SettingsButton.Content" xml:space="preserve"><value>设置</value></data>
 
   <!-- 工具栏 -->
   <data name="ZoomOut.Label" xml:space="preserve"><value>缩小</value></data>

@@ -16,5 +16,8 @@
                 HorizontalAlignment="Center"
                 Style="{StaticResource AccentButtonStyle}"
                 Click="OpenButton_Click"/>
+        <Button x:Uid="Welcome_SettingsButton"
+                HorizontalAlignment="Center"
+                Click="SettingsButton_Click"/>
     </StackPanel>
 </Page>
