@@ -1,6 +1,6 @@
 # FluentPDF
 
-基于 UWP + .NET 10 Native AOT 的 PDF 阅读器，使用 `Windows.Data.Pdf` 原生渲染，支持触控、笔迹批注和捏合缩放。
+基于 UWP + .NET 10 Native AOT 的 PDF 阅读器，使用 `Windows.Data.Pdf` 原生渲染，支持触控、笔迹批注和捏合缩放。做触控体验最好的阅读器。
 
 ## 功能
 

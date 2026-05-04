@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+
+  <!-- 应用 -->
+  <data name="AppDisplayName" xml:space="preserve"><value>FluentPDF</value></data>
+
+  <!-- 导航 -->
+  <data name="NavItem_Viewer.Content" xml:space="preserve"><value>PDF 查看器</value></data>
+
+  <!-- 标签页 -->
+  <data name="Tab_Welcome" xml:space="preserve"><value>欢迎</value></data>
+  <data name="OpenFileButton.Content" xml:space="preserve"><value>打开文件</value></data>
+
+  <!-- 欢迎页 -->
+  <data name="Welcome_Title.Text" xml:space="preserve"><value>打开一个 PDF 文件以开始阅读</value></data>
+  <data name="Welcome_OpenButton.Content" xml:space="preserve"><value>选择文件</value></data>
+
+  <!-- 工具栏 -->
+  <data name="ZoomOut.Label" xml:space="preserve"><value>缩小</value></data>
+  <data name="ZoomIn.Label" xml:space="preserve"><value>放大</value></data>
+  <data name="ZoomFit.Label" xml:space="preserve"><value>适合宽度</value></data>
+
+  <!-- 设置页 -->
+  <data name="AppearanceGroup.Text" xml:space="preserve"><value>外观</value></data>
+  <data name="ThemeTitle.Text" xml:space="preserve"><value>应用主题</value></data>
+  <data name="ThemeSubtitle.Text" xml:space="preserve"><value>选择要显示的应用主题</value></data>
+  <data name="ThemeSystem.Content" xml:space="preserve"><value>跟随系统</value></data>
+  <data name="ThemeLight.Content" xml:space="preserve"><value>浅色</value></data>
+  <data name="ThemeDark.Content" xml:space="preserve"><value>深色</value></data>
+  <data name="MaterialTitle.Text" xml:space="preserve"><value>背景材质</value></data>
+  <data name="MaterialSubtitle.Text" xml:space="preserve"><value>选择要显示的应用材质</value></data>
+  <data name="PanePositionLeft.Content" xml:space="preserve"><value>左侧</value></data>
+  <data name="PanePositionTop.Content" xml:space="preserve"><value>顶部</value></data>
+  <data name="SoundGroup.Text" xml:space="preserve"><value>声音</value></data>
+  <data name="Settings_SoundCard.Header" xml:space="preserve"><value>控件声音</value></data>
+  <data name="Settings_SoundCard.Description" xml:space="preserve"><value>控制应用中的交互提示音</value></data>
+  <data name="Settings_NavCard.Header" xml:space="preserve"><value>导航栏位置</value></data>
+  <data name="Settings_NavCard.Description" xml:space="preserve"><value>选择要显示的导航栏位置</value></data>
+  <data name="AboutGroup.Text" xml:space="preserve"><value>关于</value></data>
+  <data name="GithubLink.Text" xml:space="preserve"><value>GitHub 仓库</value></data>
+
+  <!-- 外部链接对话框 -->
+  <data name="ExternalOpenDialog.Title" xml:space="preserve"><value>此应用尝试打开外部应用</value></data>
+  <data name="ExternalOpenDialog.PrimaryButtonText" xml:space="preserve"><value>是</value></data>
+  <data name="ExternalOpenDialog.SecondaryButtonText" xml:space="preserve"><value>否</value></data>
+  <data name="DialogMessage.Text" xml:space="preserve"><value>是否允许？</value></data>
+
+  <!-- 面包屑 -->
+  <data name="Settings_Breadcrumb" xml:space="preserve"><value>设置</value></data>
+</root>

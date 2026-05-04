@@ -1,73 +1,138 @@
 ﻿using System;
-using System.Collections.ObjectModel;
-using System.ComponentModel;
-using System.Threading;
-using System.Threading.Tasks;
-using Windows.Data.Pdf;
+using Windows.ApplicationModel.Core;
 using Windows.Storage;
 using Windows.Storage.Pickers;
-using Windows.Storage.Streams;
+using Windows.UI.Core;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
-using Windows.UI.Xaml.Media.Imaging;
-using Windows.UI.Xaml.Navigation;
+using FluentPDF.Pages;
+using TabView = Microsoft.UI.Xaml.Controls.TabView;
+using TabViewItem = Microsoft.UI.Xaml.Controls.TabViewItem;
+using TabViewTabCloseRequestedEventArgs = Microsoft.UI.Xaml.Controls.TabViewTabCloseRequestedEventArgs;
 
 namespace FluentPDF
 {
-    // ── 设计原则 ──────────────────────────────────────────────────────────
-    // 页面 Grid 的 Width/Height 始终等于 OriginalSize（原始 PDF 尺寸，单位 px）。
-    // 缩放完全由 ScrollViewer.ZoomFactor 驱动，系统自动保持视口中心位置，
-    // 不需要任何手动偏移计算，彻底消除位置闪烁。
-    //
-    // 渲染分辨率 = OriginalSize * ZoomFactor，在 ZoomFactor 稳定后（ViewChanged
-    // IsIntermediate=false）按当前 ZoomFactor 重新渲染高清位图。
-    // ─────────────────────────────────────────────────────────────────────
-
     public sealed partial class MainPage : Page
     {
-        private readonly ObservableCollection<PdfPageItem> _pages = new();
-        private PdfDocument? _doc;
-        private CancellationTokenSource? _renderCts;
-
-        // ScrollViewer.ZoomFactor 就是缩放倍率，不再维护单独的 _zoom
-        private const double ZoomStep = 0.25;
-        private const double ZoomMin = 0.25;
-        private const double ZoomMax = 4.0;
+        public static MainPage? Instance { get; private set; }
 
         public MainPage()
         {
-            InitializeComponent();
-            PagesControl.ItemsSource = _pages;
-            PdfScrollViewer.ViewChanged += OnViewChanged;
-            SetupTitleBar();
+            this.InitializeComponent();
+            Instance = this;
         }
 
-        private void PdfScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
+        private void MainPage_Loaded(object sender, RoutedEventArgs e)
         {
-            PagesHost.MinWidth = PdfScrollViewer.ViewportWidth / PdfScrollViewer.ZoomFactor;
+            // 延伸内容到标题栏，并用 LayoutMetricsChanged 同步两侧占位宽度
+            var coreTitleBar = CoreApplication.GetCurrentView().TitleBar;
+            coreTitleBar.ExtendViewIntoTitleBar = true;
+            coreTitleBar.LayoutMetricsChanged += CoreTitleBar_LayoutMetricsChanged;
+
+            // 拖动区域设为整个页脚网格，避免子区域高度不一致
+            Window.Current.SetTitleBar(TitleBarDragGrid);
+
+            // 初始同步一次
+            UpdateTitleBarLayout(coreTitleBar);
+
+            AppThemeManager.CustomizeTitleBar();
+
+            // 启动时显示欢迎标签
+            AddWelcomeTab();
         }
 
-        private void SetupTitleBar()
+        private void CoreTitleBar_LayoutMetricsChanged(CoreApplicationViewTitleBar sender, object args)
+            => UpdateTitleBarLayout(sender);
+
+        private void UpdateTitleBarLayout(CoreApplicationViewTitleBar coreTitleBar)
         {
-            Window.Current.SetTitleBar(TitleBarArea);
-            var coreTitleBar = Windows.ApplicationModel.Core.CoreApplication.GetCurrentView().TitleBar;
-            TitleBarRow.Height = new Windows.UI.Xaml.GridLength(coreTitleBar.Height > 0 ? coreTitleBar.Height : 32);
-            coreTitleBar.LayoutMetricsChanged += (s, _) =>
+            // 根据流向决定哪侧是系统按钮
+            if (FlowDirection == FlowDirection.LeftToRight)
             {
-                TitleBarRow.Height = new Windows.UI.Xaml.GridLength(s.Height);
-            };
+                ShellTitlebarInset.MinWidth = coreTitleBar.SystemOverlayLeftInset;
+                CustomDragRegionColumn.Width = new GridLength(coreTitleBar.SystemOverlayRightInset);
+            }
+            else
+            {
+                ShellTitlebarInset.MinWidth = coreTitleBar.SystemOverlayRightInset;
+                CustomDragRegionColumn.Width = new GridLength(coreTitleBar.SystemOverlayLeftInset);
+            }
+
+            ShellTitlebarInset.Height = coreTitleBar.Height;
+            TitleBarDragGrid.Height = coreTitleBar.Height;
+            CustomDragRegion.Height = coreTitleBar.Height;
         }
 
-        protected override async void OnNavigatedTo(NavigationEventArgs e)
+        // ── 从 App.OnFileActivated 调用 ───────────────────────────
+
+        public void OpenFile(StorageFile? file)
         {
-            base.OnNavigatedTo(e);
-            if (e.Parameter is StorageFile file)
-                await LoadPdfAsync(file);
+            if (file != null) OpenFileInNewTab(file);
         }
 
-        // ── 文件打开 ──────────────────────────────────────────────────────
+        // ── 标签管理 ──────────────────────────────────────────────
 
-        private async void OpenButton_Click(object sender, RoutedEventArgs e)
+        private void AddWelcomeTab()
+        {
+            var welcome = new WelcomePage();
+            welcome.OpenFileRequested += async (s, e) => await PickAndOpenFile();
+
+            var tab = new TabViewItem
+            {
+                Header = GetString("Tab_Welcome"),
+                IconSource = new Microsoft.UI.Xaml.Controls.SymbolIconSource { Symbol = Symbol.Document },
+                IsClosable = false,
+                Content = welcome
+            };
+            PdfTabView.TabItems.Add(tab);
+            PdfTabView.SelectedItem = tab;
+        }
+
+        public void OpenFileInNewTab(StorageFile file)
+        {
+            // 如果当前只有欢迎标签，直接替换
+            if (PdfTabView.TabItems.Count == 1 &&
+                PdfTabView.TabItems[0] is TabViewItem first &&
+                first.Content is WelcomePage)
+            {
+                first.IsClosable = true;
+                LoadFileIntoTab(first, file);
+                return;
+            }
+
+            var tab = new TabViewItem
+            {
+                Header = file.DisplayName,
+                IconSource = new Microsoft.UI.Xaml.Controls.SymbolIconSource { Symbol = Symbol.Document },
+                IsClosable = true
+            };
+            LoadFileIntoTab(tab, file);
+            PdfTabView.TabItems.Add(tab);
+            PdfTabView.SelectedItem = tab;
+        }
+
+        private static void LoadFileIntoTab(TabViewItem tab, StorageFile file)
+        {
+            tab.Header = file.DisplayName;
+            var viewer = new PdfViewerPage();
+            tab.Content = viewer;
+            viewer.LoadFile(file);
+        }
+
+        // ── 事件处理 ──────────────────────────────────────────────
+
+        private async void TabView_AddTabButtonClick(TabView sender, object args)
+            => await PickAndOpenFile();
+
+        private void TabView_TabCloseRequested(TabView sender,
+            TabViewTabCloseRequestedEventArgs args)
+        {
+            sender.TabItems.Remove(args.Tab);
+            if (sender.TabItems.Count == 0)
+                AddWelcomeTab();
+        }
+
+        public async System.Threading.Tasks.Task PickAndOpenFile()
         {
             var picker = new FileOpenPicker
             {
@@ -76,226 +141,31 @@ namespace FluentPDF
             };
             picker.FileTypeFilter.Add(".pdf");
             StorageFile? file = await picker.PickSingleFileAsync();
-            if (file != null) await LoadPdfAsync(file);
+            if (file != null) OpenFileInNewTab(file);
         }
 
-        private async Task LoadPdfAsync(StorageFile file)
+        public async void OpenExternalLink(object sender, RoutedEventArgs e)
         {
-            PlaceholderPanel.Visibility = Visibility.Collapsed;
-            PdfScrollViewer.Visibility = Visibility.Collapsed;
-            Toolbar.Visibility = Visibility.Collapsed;
-            LoadingRing.IsActive = true;
-
-            _renderCts?.Cancel();
-            _pages.Clear();
-            _doc = null;
-
-            try
+            if (sender is HyperlinkButton link && link.Tag is string url)
             {
-                PdfDocument doc;
-                try { doc = await PdfDocument.LoadFromFileAsync(file); }
-                catch (Exception ex) when (ex.HResult == unchecked((int)0x8007052b))
-                { throw new InvalidOperationException("该 PDF 文件已加密，暂不支持密码保护的文件。"); }
-                catch (Exception ex) when (ex.HResult == unchecked((int)0x80004005))
-                { throw new InvalidOperationException("文件不是有效的 PDF 文档。"); }
-
-                _doc = doc;
-
-                // 计算初始 ZoomFactor：让第一页填满视口宽度
-                double viewportWidth = PdfScrollViewer.ActualWidth > 0
-                    ? PdfScrollViewer.ActualWidth : ActualWidth;
-
-                float initialZoom = 1.0f;
-                using (var firstPage = doc.GetPage(0))
-                {
-                    if (viewportWidth > 0 && firstPage.Size.Width > 0)
-                        initialZoom = (float)Math.Clamp(
-                            viewportWidth / firstPage.Size.Width, ZoomMin, ZoomMax);
-                }
-
-                // 页面 Grid 尺寸 = 原始 PDF 尺寸（ZoomFactor 负责视觉缩放）
-                for (uint i = 0; i < doc.PageCount; i++)
-                {
-                    using PdfPage page = doc.GetPage(i);
-                    _pages.Add(new PdfPageItem
-                    {
-                        PageIndex = i,
-                        DisplayWidth = page.Size.Width,
-                        DisplayHeight = page.Size.Height,
-                    });
-                }
-
-                LoadingRing.IsActive = false;
-                PdfScrollViewer.Visibility = Visibility.Visible;
-                Toolbar.Visibility = Visibility.Visible;
-
-                // 设置初始缩放（触发 ViewChanged → RenderVisiblePagesAsync）
-                PdfScrollViewer.ChangeView(null, null, initialZoom, disableAnimation: true);
-            }
-            catch (Exception ex)
-            {
-                LoadingRing.IsActive = false;
-                PlaceholderPanel.Visibility = Visibility.Visible;
-                var dialog = new ContentDialog
-                {
-                    Title = "无法加载 PDF",
-                    Content = ex.Message,
-                    CloseButtonText = "确定"
-                };
-                await dialog.ShowAsync();
+                var dialog = new Dialogs.ExternalOpenDialog();
+                var result = await dialog.ShowAsync();
+                if (result == ContentDialogResult.Primary)
+                    await Windows.System.Launcher.LaunchUriAsync(new Uri(url));
             }
         }
 
-        // ── 缩放控件 ──────────────────────────────────────────────────────
-
-        private void ZoomInButton_Click(object sender, RoutedEventArgs e)
+        public void ApplySettings()
         {
-            float cur = PdfScrollViewer.ZoomFactor;
-            float next = (float)Math.Min(Math.Round(cur / ZoomStep + 1) * ZoomStep, ZoomMax);
-            PdfScrollViewer.ChangeView(null, null, next, disableAnimation: true);
+            ElementSoundPlayer.State = SettingsManager.Instance.EnableSound
+                ? ElementSoundPlayerState.On
+                : ElementSoundPlayerState.Off;
         }
 
-        private void ZoomOutButton_Click(object sender, RoutedEventArgs e)
+        private static string GetString(string key)
         {
-            float cur = PdfScrollViewer.ZoomFactor;
-            float next = (float)Math.Max(Math.Round(cur / ZoomStep - 1) * ZoomStep, ZoomMin);
-            PdfScrollViewer.ChangeView(null, null, next, disableAnimation: true);
+            try { return new Windows.ApplicationModel.Resources.ResourceLoader().GetString(key); }
+            catch { return key; }
         }
-
-        private void ZoomFitButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_pages.Count == 0) return;
-            float fit = (float)Math.Clamp(
-                PdfScrollViewer.ActualWidth / _pages[0].DisplayWidth, ZoomMin, ZoomMax);
-            PdfScrollViewer.ChangeView(null, null, fit, disableAnimation: true);
-        }
-
-        // ── 按需渲染 ──────────────────────────────────────────────────────
-
-        private async void OnViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
-        {
-            if (e.IsIntermediate) return;
-            await RenderVisiblePagesAsync();
-        }
-
-        private async Task RenderVisiblePagesAsync()
-        {
-            if (_doc == null || _pages.Count == 0) return;
-
-            _renderCts?.Cancel();
-            _renderCts = new CancellationTokenSource();
-            var token = _renderCts.Token;
-
-            float zoom = PdfScrollViewer.ZoomFactor;
-
-            // 视口在内容坐标系中的范围（内容坐标 = 像素 / ZoomFactor）
-            double viewTop = PdfScrollViewer.VerticalOffset / zoom;
-            double viewBottom = viewTop + PdfScrollViewer.ViewportHeight / zoom;
-
-            // 按 DisplayHeight（原始尺寸）累加定位每页
-            double y = 0;
-            const double margin = 8.0; // 与 XAML Margin="8,8,8,8" 一致
-            int firstVisible = -1, lastVisible = -1;
-            for (int i = 0; i < _pages.Count; i++)
-            {
-                double pageBottom = y + _pages[i].DisplayHeight + margin * 2;
-                if (pageBottom >= viewTop && y <= viewBottom)
-                {
-                    if (firstVisible < 0) firstVisible = i;
-                    lastVisible = i;
-                }
-                y = pageBottom;
-            }
-
-            if (firstVisible < 0) return;
-
-            int from = Math.Max(0, firstVisible - 1);
-            int to = Math.Min(_pages.Count - 1, lastVisible + 1);
-
-            // 从视口中心开始向两边扩散渲染，让用户当前看到的页面最先更新
-            int center = (firstVisible + lastVisible) / 2;
-            var renderOrder = new System.Collections.Generic.List<int>();
-            
-            // 先加中心页
-            renderOrder.Add(center);
-            
-            // 交替加左右两侧，直到覆盖 [from, to] 范围
-            int left = center - 1;
-            int right = center + 1;
-            while (left >= from || right <= to)
-            {
-                if (right <= to) renderOrder.Add(right++);
-                if (left >= from) renderOrder.Add(left--);
-            }
-
-            foreach (int i in renderOrder)
-            {
-                if (token.IsCancellationRequested) return;
-                var item = _pages[i];
-
-                // 只在缩放变化超过阈值时重渲染，避免微小滚动触发不必要的渲染
-                if (item.PageImage != null &&
-                    Math.Abs(zoom - item.RenderedAtZoom) < 0.05f) continue;
-
-                try
-                {
-                    using PdfPage page = _doc.GetPage(item.PageIndex);
-                    uint w = (uint)Math.Max(1, Math.Round(item.DisplayWidth * zoom));
-                    uint h = (uint)Math.Max(1, Math.Round(item.DisplayHeight * zoom));
-                    var opts = new PdfPageRenderOptions
-                    {
-                        DestinationWidth = w,
-                        DestinationHeight = h
-                    };
-                    var stream = new InMemoryRandomAccessStream();
-                    await page.RenderToStreamAsync(stream, opts);
-                    if (token.IsCancellationRequested) return;
-
-                    var bitmap = new BitmapImage();
-                    await bitmap.SetSourceAsync(stream);
-                    if (token.IsCancellationRequested) return;
-
-                    item.SetImage(bitmap, zoom);
-                }
-                catch (OperationCanceledException) { return; }
-                catch { /* 单页失败不影响其他页 */ }
-            }
-        }
-    }
-
-    public sealed class PdfPageItem : INotifyPropertyChanged
-    {
-        public uint PageIndex { get; set; }
-
-        // 页面 Grid 的固定尺寸（原始 PDF 尺寸），不随缩放变化
-        public double DisplayWidth { get; set; }
-        public double DisplayHeight { get; set; }
-
-        // 记录当前位图是在哪个 ZoomFactor 下渲染的
-        public float RenderedAtZoom { get; private set; } = 0f;
-
-        private BitmapImage? _pageImage;
-        public BitmapImage? PageImage
-        {
-            get => _pageImage;
-            private set
-            {
-                _pageImage = value;
-                OnPropertyChanged(nameof(PageImage));
-                OnPropertyChanged(nameof(IsFirstLoad));
-            }
-        }
-
-        public bool IsFirstLoad => _pageImage == null;
-
-        public void SetImage(BitmapImage bitmap, float zoom)
-        {
-            RenderedAtZoom = zoom;
-            PageImage = bitmap;
-        }
-
-        public event PropertyChangedEventHandler? PropertyChanged;
-        private void OnPropertyChanged(string name)
-            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 }
