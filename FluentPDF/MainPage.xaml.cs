@@ -115,8 +115,14 @@ namespace FluentPDF
             UpdateTitleBarInsets(coreTitleBar);
             Window.Current.SetTitleBar(CustomDragRegion);
 
-            System.Diagnostics.Debug.WriteLine(
-                $"[TitleBar] CustomDragRegion actual H={CustomDragRegion.ActualHeight}, coreTitleBar.Height={coreTitleBar.Height}");
+            // 监听窗口大小变化，确保最大化 ↔ 窗口化切换时 inset 及时刷新
+            Window.Current.SizeChanged += Window_SizeChanged;
+        }
+
+        private void Window_SizeChanged(object sender, WindowSizeChangedEventArgs e)
+        {
+            var coreTitleBar = CoreApplication.GetCurrentView().TitleBar;
+            UpdateTitleBarInsets(coreTitleBar);
         }
 
         private void CoreTitleBar_LayoutMetricsChanged(CoreApplicationViewTitleBar sender, object args)

@@ -370,9 +370,25 @@ namespace FluentPDF.Pages
         private void ZoomFitButton_Click(object sender, RoutedEventArgs e)
         {
             if (_pages.Count == 0) return;
+            // 用 ViewportWidth 而非 ActualWidth，排除垂直滚动条占用的宽度
+            double vw = PdfScrollViewer.ViewportWidth > 0
+                ? PdfScrollViewer.ViewportWidth
+                : PdfScrollViewer.ActualWidth;
             float fit = (float)Math.Clamp(
-                PdfScrollViewer.ActualWidth / _pages[0].DisplayWidth, ZoomMin, _profile.MaxZoom);
-            ZoomAroundViewportCenter(fit);
+                vw / _pages[0].DisplayWidth, ZoomMin, _profile.MaxZoom);
+
+            // 提前算出缩放后的水平居中偏移，与缩放合并为一次 ChangeView，避免"放大→瞬移"两段动画
+            double ratio   = fit / PdfScrollViewer.ZoomFactor;
+            double extentAfter = PdfScrollViewer.ExtentWidth * ratio;
+            double centerH = Math.Max(0, (extentAfter - PdfScrollViewer.ViewportWidth) / 2);
+
+            // 垂直方向按缩放比例等比换算，保持视口中心对应的内容位置不变
+            // 不换算的话 offset 不变但内容缩放了，视口会飞到错误页
+            double centerV = (PdfScrollViewer.VerticalOffset + PdfScrollViewer.ViewportHeight / 2)
+                             * ratio - PdfScrollViewer.ViewportHeight / 2;
+            centerV = Math.Max(0, centerV);
+
+            PdfScrollViewer.ChangeView(centerH, centerV, fit, disableAnimation: false);
         }
 
         /// <summary>
@@ -395,10 +411,14 @@ namespace FluentPDF.Pages
 
         private void PdfScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
         {
+            // 只设 MinWidth 保证内容居中，不固定 Width。
+            // 固定 Width 会在缩放时裁切内容：ScrollViewer 对内容整体缩放，
+            // 若 PagesHost.Width 被钉死为视口宽，缩放后实际像素宽度不变，
+            // 导致超出视口的部分被裁掉或水平滚动条无法正确出现。
             double vw = PdfScrollViewer.ViewportWidth;
             double w  = vw > 0 ? vw : PdfScrollViewer.ActualWidth;
             PagesHost.MinWidth = w;
-            PagesHost.Width    = w;
+            PagesHost.Width    = double.NaN; // Auto
         }
 
         // ── 视图变化调度 ──────────────────────────────────────────

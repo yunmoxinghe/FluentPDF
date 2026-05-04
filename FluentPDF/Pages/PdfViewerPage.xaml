@@ -114,7 +114,7 @@
                                     ViewportSize="{TemplateBinding ViewportWidth}"/>
                                 <Border x:Name="ScrollBarSeparator"
                                     Grid.Column="1" Grid.Row="1"
-                                    Background="{ThemeResource SystemControlPageBackgroundChromeLowBrush}"/>
+                                    Background="Transparent"/>
                             </Grid>
                         </Border>
                     </ControlTemplate>
@@ -138,7 +138,11 @@
                     HorizontalAlignment="Left">
             <AppBarButton x:Name="ZoomOutButton" Icon="ZoomOut" x:Uid="ZoomOut" Click="ZoomOutButton_Click"/>
             <AppBarButton x:Name="ZoomInButton"  Icon="ZoomIn"  x:Uid="ZoomIn"  Click="ZoomInButton_Click"/>
-            <AppBarButton x:Name="ZoomFitButton" Icon="BackToWindow" x:Uid="ZoomFit" Click="ZoomFitButton_Click"/>
+            <AppBarButton x:Name="ZoomFitButton" x:Uid="ZoomFit" Click="ZoomFitButton_Click">
+                <AppBarButton.Icon>
+                    <FontIcon Glyph="&#xEAD6;"/>
+                </AppBarButton.Icon>
+            </AppBarButton>
             <AppBarSeparator/>
             <AppBarToggleButton x:Name="LowEndToggle"
                                 Icon="Repair"
@@ -169,7 +173,7 @@
                       MaxZoomFactor="4.0"
                       IsDeferredScrollingEnabled="False"
                       SizeChanged="PdfScrollViewer_SizeChanged">
-            <Grid x:Name="PagesHost" HorizontalAlignment="Stretch">
+            <Grid x:Name="PagesHost" HorizontalAlignment="Center">
                 <muxc:ItemsRepeater x:Name="PagesRepeater"
                                     HorizontalAlignment="Center">
                     <muxc:ItemsRepeater.Layout>
