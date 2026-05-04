@@ -16,6 +16,9 @@ namespace FluentPDF.Pages
         private void OpenButton_Click(object sender, RoutedEventArgs e)
             => OpenFileRequested?.Invoke(this, EventArgs.Empty);
 
+        private void Page_DoubleTapped(object sender, Windows.UI.Xaml.Input.DoubleTappedRoutedEventArgs e)
+            => OpenFileRequested?.Invoke(this, EventArgs.Empty);
+
         private void SettingsButton_Click(object sender, RoutedEventArgs e)
             => MainPage.Instance?.OpenSettingsTab();
     }

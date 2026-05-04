@@ -139,6 +139,11 @@
             <AppBarButton x:Name="ZoomOutButton" Icon="ZoomOut" x:Uid="ZoomOut" Click="ZoomOutButton_Click"/>
             <AppBarButton x:Name="ZoomInButton"  Icon="ZoomIn"  x:Uid="ZoomIn"  Click="ZoomInButton_Click"/>
             <AppBarButton x:Name="ZoomFitButton" Icon="BackToWindow" x:Uid="ZoomFit" Click="ZoomFitButton_Click"/>
+            <AppBarSeparator/>
+            <AppBarToggleButton x:Name="LowEndToggle"
+                                Icon="Repair"
+                                x:Uid="LowEndMode"
+                                Click="LowEndToggle_Click"/>
         </CommandBar>
 
         <!-- 工具栏底部分割线 -->

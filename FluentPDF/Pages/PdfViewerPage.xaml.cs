@@ -13,6 +13,46 @@ using Windows.UI.Xaml.Media.Imaging;
 
 namespace FluentPDF.Pages
 {
+    // ── 渲染性能档位 ─────────────────────────────────────────────
+    public sealed class RenderProfile
+    {
+        public string Name { get; init; } = "";
+        public double ResolutionScaleSlow { get; init; }    // 慢速/静止时的分辨率倍率
+        public double ResolutionScaleFast { get; init; }    // 快速滚动时的分辨率倍率
+        public int    PreloadAhead        { get; init; }    // 滚动方向前方预加载页数
+        public int    PreloadBehind       { get; init; }    // 滚动方向后方预加载页数
+        public int    BatchSize           { get; init; }    // 并行渲染批量大小
+        public int    CacheCapacity       { get; init; }    // Layer2 LRU 缓存容量
+        public uint   MaxRenderDim        { get; init; }    // 单边最大渲染像素
+        public double MaxZoom             { get; init; }    // 最大缩放倍率
+
+        public static readonly RenderProfile Normal = new()
+        {
+            Name                 = "标准",
+            ResolutionScaleSlow  = 1.0,
+            ResolutionScaleFast  = 0.5,
+            PreloadAhead         = 4,
+            PreloadBehind        = 2,
+            BatchSize            = 2,
+            CacheCapacity        = 60,
+            MaxRenderDim         = 3000,
+            MaxZoom              = 4.0,
+        };
+
+        public static readonly RenderProfile LowEnd = new()
+        {
+            Name                 = "流畅（低性能设备）",
+            ResolutionScaleSlow  = 0.85,  // 停止后也不全分辨率，最多 0.85x
+            ResolutionScaleFast  = 0.5,   // 快速滚动 0.5x
+            PreloadAhead         = 1,     // 只预加载滚动方向下一页
+            PreloadBehind        = 0,     // 反方向不预加载
+            BatchSize            = 1,     // 单任务渲染，避免并发卡死
+            CacheCapacity        = 20,    // 缓存砍到 20 页
+            MaxRenderDim         = 1200,  // 最大 1200px，防止炸
+            MaxZoom              = 2.0,   // 最大缩放 2x
+        };
+    }
+
     // ── Stream 对象池 ─────────────────────────────────────────────
     // 复用 InMemoryRandomAccessStream，避免每次渲染都分配/释放大块内存
     internal sealed class StreamPool
@@ -47,38 +87,37 @@ namespace FluentPDF.Pages
         private readonly ObservableCollection<PdfPageItem> _pages = new();
         private PdfDocument? _doc;
 
+        // ── 渲染档位 ──────────────────────────────────────────────
+        private RenderProfile _profile = RenderProfile.Normal;
+        public  bool IsLowEndMode => _profile == RenderProfile.LowEnd;
+
         // ── 渲染任务控制 ───────────────────────────────────────────
-        // 两个独立的 CTS，优先级从高到低：Layer2 > Layer1
-        private CancellationTokenSource? _layer2Cts;   // 高分辨率（可见区）
-        private CancellationTokenSource? _layer1Cts;   // 单页缩略图（后台）
+        private CancellationTokenSource? _layer2Cts;
+        private CancellationTokenSource? _layer1Cts;
         private DispatcherTimer?         _debounceTimer;
+        // 弱鸡模式单任务锁：保证同一时刻只有一个渲染任务在跑
+        private readonly SemaphoreSlim _renderLock = new(1, 1);
         private const int DebounceMs = 80;
 
         // ── 缓存 ──────────────────────────────────────────────────
-        // Layer2 LRU 缓存：key=(pageIndex, zoomBucket)，最多 60 页
-        private readonly LruCache<(uint, int), BitmapImage> _layer2Cache = new(60);
-        // Layer1 缓存：全量，每页一张缩略图
+        // Layer2 LRU 缓存：容量由档位决定
+        private LruCache<(uint, int), BitmapImage> _layer2Cache = new(RenderProfile.Normal.CacheCapacity);
         private readonly Dictionary<uint, BitmapImage> _layer1Cache = new();
-        // Stream 池：复用渲染用的内存流，池大小 = 最大并发渲染数 + 余量
         private readonly StreamPool _streamPool = new(8);
 
-        // ── 缩放常量 ──────────────────────────────────────────────
-        private const double ZoomStep           = 0.25;
-        private const double ZoomMin            = 0.25;
-        private const double ZoomMax            = 4.0;
-        private const int    PreloadAhead       = 4;   // 滚动方向前方预加载页数
-        private const int    PreloadBehind      = 2;   // 滚动方向后方预加载页数
-        private const uint   Layer1Width        = 160; // Layer1 每页缩略图宽度（px）
-        private const uint   Layer2MaxDim       = 3000;// Layer2 单边最大像素，防止超高分辨率渲染
+        // ── 固定常量 ──────────────────────────────────────────────
+        private const double ZoomStep   = 0.25;
+        private const double ZoomMin    = 0.25;
+        private const uint   Layer1Width = 160;
 
         // ── 滚动方向 & 速度追踪 ───────────────────────────────────
         private double _lastVerticalOffset  = 0;
-        private double _lastOffsetTimestamp = 0; // Environment.TickCount64
-        private double _scrollVelocity      = 0; // px/ms，正=向下，负=向上
-        private int    _scrollDirection     = 0; // +1 向下，-1 向上，0 未知
+        private double _lastOffsetTimestamp = 0;
+        private double _scrollVelocity      = 0; // px/ms
+        private int    _scrollDirection     = 0; // +1 向下，-1 向上
 
         // ── DPI ───────────────────────────────────────────────────
-        private double _dpiScale = 1.0; // 物理像素 / 逻辑像素，从 DisplayInformation 读取
+        private double _dpiScale = 1.0;
 
         private StorageFile? _pendingFile;
 
@@ -95,6 +134,21 @@ namespace FluentPDF.Pages
         }
 
         // ── 公开接口 ──────────────────────────────────────────────
+
+        /// <summary>手动切换渲染档位，切换后重新渲染当前视口。</summary>
+        public void SetProfile(RenderProfile profile)
+        {
+            if (_profile == profile) return;
+            _profile = profile;
+            // 重建缓存（容量变了）
+            _layer2Cache = new LruCache<(uint, int), BitmapImage>(profile.CacheCapacity);
+            // 更新 ScrollViewer 最大缩放
+            PdfScrollViewer.MaxZoomFactor = (float)profile.MaxZoom;
+            // 如果当前缩放超出新上限，夹回去
+            if (PdfScrollViewer.ZoomFactor > (float)profile.MaxZoom)
+                PdfScrollViewer.ChangeView(null, null, (float)profile.MaxZoom, disableAnimation: true);
+            ScheduleLayer2();
+        }
 
         public void LoadFile(StorageFile file)
         {
@@ -143,6 +197,13 @@ namespace FluentPDF.Pages
 
                 _doc = doc;
 
+                // ── 自动档位检测：页数 > 100 或首页超大，自动进入弱鸡模式 ──
+                bool autoLowEnd = doc.PageCount > 100;
+                using (var fp0 = doc.GetPage(0))
+                    autoLowEnd |= fp0.Size.Width > 2000 || fp0.Size.Height > 2000;
+                _profile = autoLowEnd ? RenderProfile.LowEnd : RenderProfile.Normal;
+                _layer2Cache = new LruCache<(uint, int), BitmapImage>(_profile.CacheCapacity);
+
                 double viewportWidth = PdfScrollViewer.ActualWidth > 0
                     ? PdfScrollViewer.ActualWidth : ActualWidth;
 
@@ -150,7 +211,7 @@ namespace FluentPDF.Pages
                 using (var fp = doc.GetPage(0))
                 {
                     if (viewportWidth > 0 && fp.Size.Width > 0)
-                        initialZoom = (float)Math.Clamp(viewportWidth / fp.Size.Width, ZoomMin, ZoomMax);
+                        initialZoom = (float)Math.Clamp(viewportWidth / fp.Size.Width, ZoomMin, _profile.MaxZoom);
                     _pages.Add(new PdfPageItem
                     {
                         PageIndex     = 0,
@@ -162,6 +223,8 @@ namespace FluentPDF.Pages
                 LoadingRing.IsActive       = false;
                 PdfScrollViewer.Visibility = Visibility.Visible;
                 Toolbar.Visibility         = Visibility.Visible;
+                PdfScrollViewer.MaxZoomFactor = (float)_profile.MaxZoom;
+                LowEndToggle.IsChecked     = IsLowEndMode;
                 PdfScrollViewer.ChangeView(null, null, initialZoom, disableAnimation: true);
 
                 // 立即渲染可见区高分辨率
@@ -284,26 +347,50 @@ namespace FluentPDF.Pages
 
         // ── 缩放控件 ──────────────────────────────────────────────
 
+        private void LowEndToggle_Click(object sender, RoutedEventArgs e)
+        {
+            bool goLowEnd = LowEndToggle.IsChecked == true;
+            SetProfile(goLowEnd ? RenderProfile.LowEnd : RenderProfile.Normal);
+        }
+
         private void ZoomInButton_Click(object sender, RoutedEventArgs e)
         {
             float cur = PdfScrollViewer.ZoomFactor;
-            float next = (float)Math.Min(Math.Round(cur / ZoomStep + 1) * ZoomStep, ZoomMax);
-            PdfScrollViewer.ChangeView(null, null, next, disableAnimation: true);
+            float next = (float)Math.Min(Math.Round(cur / ZoomStep + 1) * ZoomStep, _profile.MaxZoom);
+            ZoomAroundViewportCenter(next);
         }
 
         private void ZoomOutButton_Click(object sender, RoutedEventArgs e)
         {
             float cur = PdfScrollViewer.ZoomFactor;
             float next = (float)Math.Max(Math.Round(cur / ZoomStep - 1) * ZoomStep, ZoomMin);
-            PdfScrollViewer.ChangeView(null, null, next, disableAnimation: true);
+            ZoomAroundViewportCenter(next);
         }
 
         private void ZoomFitButton_Click(object sender, RoutedEventArgs e)
         {
             if (_pages.Count == 0) return;
             float fit = (float)Math.Clamp(
-                PdfScrollViewer.ActualWidth / _pages[0].DisplayWidth, ZoomMin, ZoomMax);
-            PdfScrollViewer.ChangeView(null, null, fit, disableAnimation: true);
+                PdfScrollViewer.ActualWidth / _pages[0].DisplayWidth, ZoomMin, _profile.MaxZoom);
+            ZoomAroundViewportCenter(fit);
+        }
+
+        /// <summary>
+        /// 以视口中心为基准点缩放，并带平滑动画。
+        /// 计算原理：缩放后保持视口中心对应的内容坐标不变，
+        /// 即 newOffset = (oldOffset + viewportSize/2) * (newZoom/oldZoom) - viewportSize/2
+        /// </summary>
+        private void ZoomAroundViewportCenter(float newZoom)
+        {
+            float oldZoom = PdfScrollViewer.ZoomFactor;
+            double ratio  = newZoom / oldZoom;
+
+            double newH = (PdfScrollViewer.HorizontalOffset + PdfScrollViewer.ViewportWidth  / 2) * ratio
+                          - PdfScrollViewer.ViewportWidth  / 2;
+            double newV = (PdfScrollViewer.VerticalOffset   + PdfScrollViewer.ViewportHeight / 2) * ratio
+                          - PdfScrollViewer.ViewportHeight / 2;
+
+            PdfScrollViewer.ChangeView(newH, newV, newZoom, disableAnimation: false);
         }
 
         private void PdfScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -384,28 +471,23 @@ namespace FluentPDF.Pages
         {
             if (_doc == null || _pages.Count == 0) return;
 
+            var p    = _profile; // 快照，避免渲染中途档位切换导致不一致
             float zoom = PdfScrollViewer.ZoomFactor;
             var (firstVisible, lastVisible) = GetVisibleRange();
             if (firstVisible < 0) return;
 
-            // ── 动态分辨率：按滚动速度缩放渲染倍率 ──────────────
-            // 速度（px/ms）→ 渲染倍率（相对于 zoom）
-            // 静止/慢速: 1.0（全分辨率）  中速: 0.75  快速: 0.5
-            double absVel      = Math.Abs(_scrollVelocity);
-            double resolutionScale = absVel < 0.5  ? 1.0 :   // 慢/静止
-                                     absVel < 2.0  ? 0.75 :  // 中速
-                                                     0.5;    // 快速
-            // 乘以 DPI 缩放，对齐物理像素
+            // ── 动态分辨率 ────────────────────────────────────────
+            double absVel          = Math.Abs(_scrollVelocity);
+            double resolutionScale = absVel < 0.5 ? p.ResolutionScaleSlow
+                                   : absVel < 2.0 ? (p.ResolutionScaleSlow + p.ResolutionScaleFast) / 2.0
+                                   :                p.ResolutionScaleFast;
             double renderScale = zoom * resolutionScale * _dpiScale;
 
-            // ── 预测停止点：用当前速度估算惯性滑行距离 ──────────
-            // 简单线性衰减模型：假设 ~300ms 内速度归零
-            double predictedOffset = PdfScrollViewer.VerticalOffset
-                                   + _scrollVelocity * 150; // 取半程作为预测中心
+            // ── 预测停止点 ────────────────────────────────────────
+            double predictedOffset     = PdfScrollViewer.VerticalOffset + _scrollVelocity * 150;
             double predictedViewTop    = predictedOffset / zoom;
             double predictedViewBottom = predictedViewTop + PdfScrollViewer.ViewportHeight / zoom;
 
-            // 找出预测停止区域覆盖的页范围
             int predFirst = firstVisible, predLast = lastVisible;
             {
                 double y = 0; const double sp = 16.0;
@@ -413,17 +495,14 @@ namespace FluentPDF.Pages
                 {
                     double bottom = y + _pages[i].DisplayHeight;
                     if (bottom >= predictedViewTop && y <= predictedViewBottom)
-                    {
-                        if (predFirst == firstVisible) predFirst = Math.Min(i, firstVisible);
-                        predLast = Math.Max(i, lastVisible);
-                    }
+                    { predFirst = Math.Min(i, predFirst); predLast = Math.Max(i, predLast); }
                     y = bottom + sp;
                 }
             }
 
-            // ── 预加载范围（方向感知 + 预测区域合并）────────────
-            int ahead  = _scrollDirection >= 0 ? PreloadAhead  : PreloadBehind;
-            int behind = _scrollDirection >= 0 ? PreloadBehind : PreloadAhead;
+            // ── 预加载范围 ────────────────────────────────────────
+            int ahead  = _scrollDirection >= 0 ? p.PreloadAhead  : p.PreloadBehind;
+            int behind = _scrollDirection >= 0 ? p.PreloadBehind : p.PreloadAhead;
             int from   = Math.Max(0, Math.Min(firstVisible, predFirst) - behind);
             int to     = Math.Min(_pages.Count - 1, Math.Max(lastVisible, predLast) + ahead);
 
@@ -431,92 +510,129 @@ namespace FluentPDF.Pages
             var order      = BuildRenderOrder(center, from, to);
             int zoomBucket = ZoomToBucket((float)renderScale);
 
-            // 降级范围外的页面
             for (int i = 0; i < _pages.Count; i++)
-            {
                 if (i < from || i > to)
                     _pages[i].EvictLayer2(_layer1Cache);
-            }
 
-            // 第一轮：只渲染可见区
+            // ── 第一轮：可见区，批量渲染 + 合帧 ─────────────────
+            var visibleOrder = new List<int>();
             foreach (int i in order)
+                if (i >= firstVisible && i <= lastVisible) visibleOrder.Add(i);
+
+            for (int b = 0; b < visibleOrder.Count; b += p.BatchSize)
             {
                 if (token.IsCancellationRequested) return;
-                var item = _pages[i];
 
-                if (_layer2Cache.TryGet((item.PageIndex, zoomBucket), out var cached))
+                int batchEnd   = Math.Min(b + p.BatchSize, visibleOrder.Count);
+                var batchItems = new List<(PdfPageItem item, int idx)>();
+
+                for (int k = b; k < batchEnd; k++)
                 {
-                    item.SetLayer2(cached!);
-                    continue;
+                    int i    = visibleOrder[k];
+                    var item = _pages[i];
+                    if (_layer2Cache.TryGet((item.PageIndex, zoomBucket), out var cached))
+                        item.SetLayer2(cached!);
+                    else
+                        batchItems.Add((item, i));
                 }
 
-                if (i < firstVisible || i > lastVisible)
-                    continue;
+                if (batchItems.Count == 0) continue;
 
-                await RenderLayer2PageAsync(item, (float)renderScale, zoomBucket, token);
+                Task<BitmapImage?>[] tasks;
+                if (p.BatchSize == 1)
+                {
+                    // 弱鸡模式：单任务，走渲染锁
+                    tasks = new[] { RenderWithLockAsync(batchItems[0].item, (float)renderScale, p, token) };
+                }
+                else
+                {
+                    tasks = batchItems.ConvertAll(x =>
+                        RenderLayer2PageToBitmapAsync(x.item, (float)renderScale, p, token)).ToArray();
+                }
+
+                var results = await Task.WhenAll(tasks);
+                if (token.IsCancellationRequested) return;
+
+                for (int k = 0; k < batchItems.Count; k++)
+                {
+                    if (results[k] is not { } bitmap) continue;
+                    var (item, _) = batchItems[k];
+                    _layer2Cache.Put((item.PageIndex, zoomBucket), bitmap);
+                    item.SetLayer2(bitmap);
+                }
             }
 
             if (token.IsCancellationRequested) return;
 
-            // 第二轮：补全预加载范围
+            // ── 第二轮：预加载范围，串行，不写缓存 ───────────────
             foreach (int i in order)
             {
                 if (token.IsCancellationRequested) return;
                 var item = _pages[i];
                 if (item.IsLayer2Ready) continue;
+                if (i >= firstVisible && i <= lastVisible) continue;
 
                 if (_layer2Cache.TryGet((item.PageIndex, zoomBucket), out var cached))
-                {
-                    item.SetLayer2(cached!);
-                    continue;
-                }
+                { item.SetLayer2(cached!); continue; }
 
-                await RenderLayer2PageAsync(item, (float)renderScale, zoomBucket, token);
+                // 弱鸡模式：补高清时每页之间加 60ms 间隔，避免一次性补帧风暴
+                if (p.BatchSize == 1) await Task.Delay(60, token);
+                if (token.IsCancellationRequested) return;
+
+                var bmp = await RenderWithLockAsync(item, (float)renderScale, p, token);
+                if (bmp != null && !token.IsCancellationRequested)
+                    item.SetLayer2(bmp);
             }
 
-            // Layer2 完成后，恢复后台 Layer1（如果被抢占过）
             if (!token.IsCancellationRequested)
                 ResumeBackgroundLayer1();
         }
 
-        private async Task RenderLayer2PageAsync(
-            PdfPageItem item, float renderScale, int zoomBucket, CancellationToken token)
+        /// <summary>弱鸡模式专用：通过 SemaphoreSlim 保证单任务渲染。</summary>
+        private async Task<BitmapImage?> RenderWithLockAsync(
+            PdfPageItem item, float renderScale, RenderProfile p, CancellationToken token)
+        {
+            await _renderLock.WaitAsync(token);
+            try   { return await RenderLayer2PageToBitmapAsync(item, renderScale, p, token); }
+            finally { _renderLock.Release(); }
+        }
+
+        /// <summary>只渲染，不更新 UI，不写缓存。由调用方决定何时合帧。</summary>
+        private async Task<BitmapImage?> RenderLayer2PageToBitmapAsync(
+            PdfPageItem item, float renderScale, RenderProfile p, CancellationToken token)
         {
             try
             {
                 using PdfPage page = _doc!.GetPage(item.PageIndex);
-                // renderScale 已包含 zoom * resolutionScale * dpiScale
-                uint w = (uint)Math.Max(1, Math.Round(item.DisplayWidth  * renderScale));
-                uint h = (uint)Math.Max(1, Math.Round(item.DisplayHeight * renderScale));
+                uint w = AlignTo4((uint)Math.Max(1, Math.Round(item.DisplayWidth  * renderScale)));
+                uint h = AlignTo4((uint)Math.Max(1, Math.Round(item.DisplayHeight * renderScale)));
 
-                // 限制最大渲染分辨率，防止高缩放时渲染超大位图
-                if (w > Layer2MaxDim || h > Layer2MaxDim)
+                if (w > p.MaxRenderDim || h > p.MaxRenderDim)
                 {
-                    double scale = Math.Min((double)Layer2MaxDim / w, (double)Layer2MaxDim / h);
-                    w = (uint)Math.Max(1, Math.Round(w * scale));
-                    h = (uint)Math.Max(1, Math.Round(h * scale));
+                    double scale = Math.Min((double)p.MaxRenderDim / w, (double)p.MaxRenderDim / h);
+                    w = AlignTo4((uint)Math.Max(1, Math.Round(w * scale)));
+                    h = AlignTo4((uint)Math.Max(1, Math.Round(h * scale)));
                 }
 
-                var opts = new PdfPageRenderOptions { DestinationWidth = w, DestinationHeight = h };
-                BitmapImage bitmap;
+                var opts   = new PdfPageRenderOptions { DestinationWidth = w, DestinationHeight = h };
                 var stream = _streamPool.Rent();
                 try
                 {
                     await page.RenderToStreamAsync(stream, opts);
-                    if (token.IsCancellationRequested) { _streamPool.Return(stream); return; }
-                    bitmap = new BitmapImage();
+                    if (token.IsCancellationRequested) return null;
+                    var bitmap = new BitmapImage();
                     stream.Seek(0);
                     await bitmap.SetSourceAsync(stream);
+                    return token.IsCancellationRequested ? null : bitmap;
                 }
                 finally { _streamPool.Return(stream); }
-                if (token.IsCancellationRequested) return;
-
-                _layer2Cache.Put((item.PageIndex, zoomBucket), bitmap);
-                item.SetLayer2(bitmap);
             }
-            catch (OperationCanceledException) { }
-            catch { }
+            catch (OperationCanceledException) { return null; }
+            catch { return null; }
         }
+
+        /// <summary>宽度/高度对齐到 4 的倍数，改善 GPU 纹理对齐效率。</summary>
+        private static uint AlignTo4(uint v) => (v + 3u) & ~3u;
 
         private void ResumeBackgroundLayer1()
         {

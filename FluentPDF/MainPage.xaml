@@ -13,7 +13,8 @@
                       VerticalAlignment="Stretch"
                       TabWidthMode="Equal"
                       AddTabButtonClick="TabView_AddTabButtonClick"
-                      TabCloseRequested="TabView_TabCloseRequested">
+                      TabCloseRequested="TabView_TabCloseRequested"
+                      Loaded="PdfTabView_Loaded">
 
             <muxc:TabView.TabStripHeader>
                 <Grid x:Name="ShellTitlebarInset" Background="Transparent"/>

@@ -2,23 +2,31 @@
     x:Class="FluentPDF.Pages.WelcomePage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Background="Transparent">
+    xmlns:controls="using:CommunityToolkit.WinUI.Controls"
+    xmlns:ui="using:CommunityToolkit.WinUI"
+    Background="Transparent"
+    DoubleTapped="Page_DoubleTapped">
 
     <StackPanel HorizontalAlignment="Center"
                 VerticalAlignment="Center"
-                Spacing="16">
+                Spacing="16"
+                MinWidth="320">
         <FontIcon Glyph="&#xEA90;" FontSize="64"
+                  HorizontalAlignment="Center"
                   Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}"/>
         <TextBlock x:Uid="Welcome_Title"
                    Style="{ThemeResource SubtitleTextBlockStyle}"
                    HorizontalAlignment="Center"
                    Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}"/>
-        <Button x:Uid="Welcome_OpenButton"
-                HorizontalAlignment="Center"
-                Style="{StaticResource AccentButtonStyle}"
-                Click="OpenButton_Click"/>
-        <Button x:Uid="Welcome_SettingsButton"
-                HorizontalAlignment="Center"
-                Click="SettingsButton_Click"/>
+
+        <controls:SettingsCard x:Uid="Welcome_OpenCard"
+                               IsClickEnabled="True"
+                               Click="OpenButton_Click"
+                               HeaderIcon="{ui:FontIcon Glyph=&#xE8E5;}"/>
+
+        <controls:SettingsCard x:Uid="Welcome_SettingsCard"
+                               IsClickEnabled="True"
+                               Click="SettingsButton_Click"
+                               HeaderIcon="{ui:FontIcon Glyph=&#xE713;}"/>
     </StackPanel>
 </Page>

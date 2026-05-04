@@ -7,6 +7,8 @@ using Windows.Storage.Pickers;
 using Windows.UI.Core;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
+using Windows.UI.Xaml.Media;
+using Windows.UI.Xaml.Media.Animation;
 using FluentPDF.Pages;
 using TabView = Microsoft.UI.Xaml.Controls.TabView;
 using TabViewItem = Microsoft.UI.Xaml.Controls.TabViewItem;
@@ -20,6 +22,9 @@ namespace FluentPDF
 
         // 标记本次启动是否由文件关联触发（跳过欢迎页）
         private bool _launchedByFile = false;
+
+        // 下一个被添加的标签需要播放入场动画
+        private TabViewItem? _pendingAnimationTab = null;
 
         public MainPage()
         {
@@ -38,11 +43,67 @@ namespace FluentPDF
             AppThemeManager.CustomizeTitleBar();
 
             if (Window.Current.Content is Windows.UI.Xaml.FrameworkElement rootEl)
-                rootEl.ActualThemeChanged += (s, args) => AppThemeManager.CustomizeTitleBar();
+                rootEl.ActualThemeChanged += OnRootThemeChanged;
 
             // 文件关联启动时不显示欢迎页；普通启动根据设置决定
             if (!_launchedByFile && SettingsManager.Instance.ShowWelcomeOnLaunch)
                 AddWelcomeTab();
+        }
+
+        private static void OnRootThemeChanged(FrameworkElement sender, object args)
+            => AppThemeManager.CustomizeTitleBar();
+
+        private void PdfTabView_Loaded(object sender, RoutedEventArgs e)
+        {
+            // 找到 TabView 内部的 ListView，清空其 ItemContainerTransitions，
+            // 防止新增标签时所有已有标签重放动画（WinUI 已知 bug）。
+            var listView = FindDescendant<ListView>(PdfTabView);
+            if (listView != null)
+            {
+                listView.ItemContainerTransitions = new TransitionCollection();
+                // 监听容器生成事件，给新标签单独播动画
+                listView.ContainerContentChanging += TabListView_ContainerContentChanging;
+            }
+        }
+
+        private void TabListView_ContainerContentChanging(
+            ListViewBase sender,
+            ContainerContentChangingEventArgs args)
+        {
+            // 只处理新增（非回收复用）且是我们标记的那个标签
+            if (!args.InRecycleQueue
+                && args.Item is TabViewItem tab
+                && tab == _pendingAnimationTab)
+            {
+                _pendingAnimationTab = null;
+
+                // 给容器临时加入场动画，触发后立即清空，避免影响后续操作
+                var container = args.ItemContainer;
+                container.Transitions = new TransitionCollection
+                {
+                    new EntranceThemeTransition { FromHorizontalOffset = 40, FromVerticalOffset = 0 }
+                };
+
+                // 下一帧清掉，防止关闭/重排时再次触发
+                _ = container.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Low, () =>
+                {
+                    container.Transitions = new TransitionCollection();
+                });
+            }
+        }
+
+        /// <summary>在可视树中查找第一个指定类型的后代元素。</summary>
+        private static T? FindDescendant<T>(DependencyObject parent) where T : DependencyObject
+        {
+            int count = VisualTreeHelper.GetChildrenCount(parent);
+            for (int i = 0; i < count; i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is T target) return target;
+                var result = FindDescendant<T>(child);
+                if (result != null) return result;
+            }
+            return null;
         }
 
         private void CustomDragRegion_Loaded(object sender, RoutedEventArgs e)
@@ -109,6 +170,7 @@ namespace FluentPDF
                 IsClosable = true,
                 Content = new Pages.SettingsPage()
             };
+            _pendingAnimationTab = tab;
             PdfTabView.TabItems.Add(tab);
             PdfTabView.SelectedItem = tab;
         }
@@ -127,6 +189,7 @@ namespace FluentPDF
                 IsClosable = false,
                 Content = welcome
             };
+            _pendingAnimationTab = tab;
             PdfTabView.TabItems.Add(tab);
             PdfTabView.SelectedItem = tab;
         }
@@ -136,10 +199,11 @@ namespace FluentPDF
             var tab = new TabViewItem
             {
                 Header = file.DisplayName,
-                IconSource = new Microsoft.UI.Xaml.Controls.SymbolIconSource { Symbol = Symbol.Document },
+                IconSource = new Microsoft.UI.Xaml.Controls.FontIconSource { Glyph = "\uEA90" },
                 IsClosable = true
             };
             LoadFileIntoTab(tab, file);
+            _pendingAnimationTab = tab;
             PdfTabView.TabItems.Add(tab);
             PdfTabView.SelectedItem = tab;
 

@@ -3,7 +3,6 @@ using System.Diagnostics;
 using Windows.ApplicationModel;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
-using Windows.UI.Xaml.Media.Imaging;
 
 namespace FluentPDF.Pages
 {
@@ -14,7 +13,8 @@ namespace FluentPDF.Pages
         public SettingsPage()
         {
             this.InitializeComponent();
-            this.Loaded += SettingsPage_Loaded;
+            this.Loaded   += SettingsPage_Loaded;
+            this.Unloaded += SettingsPage_Unloaded;
         }
 
         private void SettingsPage_Loaded(object sender, RoutedEventArgs e)
@@ -28,6 +28,12 @@ namespace FluentPDF.Pages
                 root.ActualThemeChanged -= AppThemeManager.OnActualThemeChanged;
                 root.ActualThemeChanged += AppThemeManager.OnActualThemeChanged;
             }
+        }
+
+        private void SettingsPage_Unloaded(object sender, RoutedEventArgs e)
+        {
+            if (Window.Current.Content is FrameworkElement root)
+                root.ActualThemeChanged -= AppThemeManager.OnActualThemeChanged;
         }
 
         private void LoadUI()
@@ -47,7 +53,6 @@ namespace FluentPDF.Pages
                 TxtAppName.Text = Package.Current.DisplayName;
                 var v = Package.Current.Id.Version;
                 TxtVersion.Text = $"{v.Major}.{v.Minor}.{v.Build}.{v.Revision}";
-                ImgAppIcon.Source = new BitmapImage(Package.Current.Logo);
                 TxtCopyright.Text = $"©{DateTime.Now.Year} {Package.Current.PublisherDisplayName}。保留所有权利。";
             }
             catch (Exception ex) { Debug.WriteLine($"LoadAppInfo 错误: {ex.Message}"); }

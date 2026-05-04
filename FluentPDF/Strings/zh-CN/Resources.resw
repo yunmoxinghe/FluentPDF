@@ -45,12 +45,17 @@
   <data name="Welcome_Title.Text" xml:space="preserve"><value>打开一个 PDF 文件以开始阅读</value></data>
   <data name="Welcome_OpenButton.Content" xml:space="preserve"><value>选择文件</value></data>
   <data name="Welcome_SettingsButton.Content" xml:space="preserve"><value>设置</value></data>
+  <data name="Welcome_OpenCard.Header" xml:space="preserve"><value>选择文件</value></data>
+  <data name="Welcome_OpenCard.Description" xml:space="preserve"><value>从本地选择一个 PDF 文件打开</value></data>
+  <data name="Welcome_SettingsCard.Header" xml:space="preserve"><value>设置</value></data>
+  <data name="Welcome_SettingsCard.Description" xml:space="preserve"><value>调整应用外观与行为</value></data>
 
   <!-- 工具栏 -->
   <data name="ZoomOut.Label" xml:space="preserve"><value>缩小</value></data>
   <data name="ZoomIn.Label" xml:space="preserve"><value>放大</value></data>
   <data name="ZoomFit.Label" xml:space="preserve"><value>适合宽度</value></data>
   <data name="FullScreen.Label" xml:space="preserve"><value>全屏</value></data>
+  <data name="LowEndMode.Label" xml:space="preserve"><value>流畅模式</value></data>
 
   <!-- 设置页 -->
   <data name="AppearanceGroup.Text" xml:space="preserve"><value>外观</value></data>
@@ -61,6 +66,10 @@
   <data name="ThemeDark.Content" xml:space="preserve"><value>深色</value></data>
   <data name="MaterialTitle.Text" xml:space="preserve"><value>背景材质</value></data>
   <data name="MaterialSubtitle.Text" xml:space="preserve"><value>选择要显示的应用材质</value></data>
+  <data name="Settings_ThemeExpander.Header" xml:space="preserve"><value>应用主题</value></data>
+  <data name="Settings_ThemeExpander.Description" xml:space="preserve"><value>选择要显示的应用主题</value></data>
+  <data name="Settings_MaterialExpander.Header" xml:space="preserve"><value>背景材质</value></data>
+  <data name="Settings_MaterialExpander.Description" xml:space="preserve"><value>选择要显示的应用材质</value></data>
   <data name="PanePositionLeft.Content" xml:space="preserve"><value>左侧</value></data>
   <data name="PanePositionTop.Content" xml:space="preserve"><value>顶部</value></data>
   <data name="SoundGroup.Text" xml:space="preserve"><value>声音</value></data>
@@ -84,6 +93,7 @@
 
   <!-- 面包屑 -->
   <data name="Settings_Breadcrumb" xml:space="preserve"><value>设置</value></data>
+  <data name="Settings_PageTitle.Text" xml:space="preserve"><value>设置</value></data>
 
   <!-- 拖拽 -->
   <data name="DragDrop_OpenPDF" xml:space="preserve"><value>打开 PDF</value></data>
