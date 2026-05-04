@@ -212,7 +212,23 @@ namespace FluentPDF
             int from = Math.Max(0, firstVisible - 1);
             int to = Math.Min(_pages.Count - 1, lastVisible + 1);
 
-            for (int i = from; i <= to; i++)
+            // 从视口中心开始向两边扩散渲染，让用户当前看到的页面最先更新
+            int center = (firstVisible + lastVisible) / 2;
+            var renderOrder = new System.Collections.Generic.List<int>();
+            
+            // 先加中心页
+            renderOrder.Add(center);
+            
+            // 交替加左右两侧，直到覆盖 [from, to] 范围
+            int left = center - 1;
+            int right = center + 1;
+            while (left >= from || right <= to)
+            {
+                if (right <= to) renderOrder.Add(right++);
+                if (left >= from) renderOrder.Add(left--);
+            }
+
+            foreach (int i in renderOrder)
             {
                 if (token.IsCancellationRequested) return;
                 var item = _pages[i];
