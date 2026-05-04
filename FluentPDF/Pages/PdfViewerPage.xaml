@@ -145,9 +145,12 @@
             </AppBarButton>
             <AppBarSeparator/>
             <AppBarToggleButton x:Name="LowEndToggle"
-                                Icon="Repair"
                                 x:Uid="LowEndMode"
-                                Click="LowEndToggle_Click"/>
+                                Click="LowEndToggle_Click">
+                <AppBarToggleButton.Icon>
+                    <FontIcon Glyph="&#xE945;"/>
+                </AppBarToggleButton.Icon>
+            </AppBarToggleButton>
         </CommandBar>
 
         <!-- 工具栏底部分割线 -->
