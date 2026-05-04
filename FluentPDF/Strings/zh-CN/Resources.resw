@@ -84,6 +84,7 @@
   <data name="Settings_AllowCloseWelcomeCard.Description" xml:space="preserve"><value>打开其他文件后，欢迎标签将变为可关闭</value></data>
   <data name="AboutGroup.Text" xml:space="preserve"><value>关于</value></data>
   <data name="GithubLink.Text" xml:space="preserve"><value>GitHub 仓库</value></data>
+  <data name="TemplateLink.Text" xml:space="preserve"><value>应用模板</value></data>
 
   <!-- 外部链接对话框 -->
   <data name="ExternalOpenDialog.Title" xml:space="preserve"><value>此应用尝试打开外部应用</value></data>

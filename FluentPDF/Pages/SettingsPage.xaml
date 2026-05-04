@@ -111,6 +111,10 @@
                                                  Tag="https://github.com/yunmoxinghe/FluentPDF">
                                     <TextBlock x:Uid="GithubLink"/>
                                 </HyperlinkButton>
+                                <HyperlinkButton Click="OpenExternalLink"
+                                                 Tag="https://github.com/Furry-Xiyi/UWP-Blank-Template">
+                                    <TextBlock x:Uid="TemplateLink"/>
+                                </HyperlinkButton>
                             </StackPanel>
                         </controls:SettingsCard>
                     </controls:SettingsExpander.Items>
