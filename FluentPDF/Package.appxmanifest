@@ -7,15 +7,15 @@
   IgnorableNamespaces="uap mp">
 
   <Identity
-    Name="34a0763e-9b55-485f-85b8-95da988f3f57"
-    Publisher="CN=gold"
+    Name="8B8CC4F4.EasePDF"
+    Publisher="CN=A19C62A9-1AA6-44AB-9F57-2DE6C380D9C9"
     Version="1.0.0.0" />
 
-  <mp:PhoneIdentity PhoneProductId="34a0763e-9b55-485f-85b8-95da988f3f57" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
+  <mp:PhoneIdentity PhoneProductId="23241dd9-1fb2-45e5-a76e-8754c600b50a" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
   <Properties>
-    <DisplayName>FluentPDF</DisplayName>
-    <PublisherDisplayName>gold</PublisherDisplayName>
+    <DisplayName>EasePDF</DisplayName>
+    <PublisherDisplayName>云漠星</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
 
@@ -32,7 +32,7 @@
       Executable="$targetnametoken$.exe"
       EntryPoint="FluentPDF.App">
       <uap:VisualElements
-        DisplayName="FluentPDF"
+        DisplayName="EasePDF"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png"
         Description="FluentPDF"

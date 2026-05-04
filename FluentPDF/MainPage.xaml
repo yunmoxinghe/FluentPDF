@@ -17,22 +17,26 @@
                 <Grid x:Name="ShellTitlebarInset" Background="Transparent"/>
             </muxc:TabView.TabStripHeader>
 
-            <!-- 右侧：拖拽区域占满剩余空间，系统按钮保留固定占位 -->
+            <!-- 右侧：仅保留系统按钮占位，不再作为 SetTitleBar 目标 -->
             <muxc:TabView.TabStripFooter>
-                <Grid x:Name="TitleBarDragGrid" Background="Transparent">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <!-- 系统按钮占位（最右侧） -->
-                        <ColumnDefinition x:Name="CustomDragRegionColumn" Width="188"/>
-                    </Grid.ColumnDefinitions>
-
-                    <!-- 可拖拽区域，必须靠近系统按钮 -->
-                    <Grid x:Name="CustomDragRegion"
-                          Grid.Column="0"
-                          Background="Transparent"/>
-                </Grid>
+                <Grid x:Name="SystemButtonInset" Background="Transparent"/>
             </muxc:TabView.TabStripFooter>
 
         </muxc:TabView>
+
+        <!--
+            真正的拖拽区域：直接叠加在页面顶部，不受 TabView 内部 padding 影响。
+            高度在 code-behind 里跟随 PdfTabView 标签栏实际高度同步。
+        -->
+        <Grid x:Name="TitleBarDragGrid"
+              VerticalAlignment="Top"
+              HorizontalAlignment="Stretch"
+              Background="Transparent">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="LeftInsetColumn" Width="0"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition x:Name="RightInsetColumn" Width="0"/>
+            </Grid.ColumnDefinitions>
+        </Grid>
     </Grid>
 </Page>
