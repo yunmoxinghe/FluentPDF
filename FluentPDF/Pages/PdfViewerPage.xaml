@@ -146,7 +146,7 @@
                 VerticalAlignment="Bottom"
                 Height="1"
                 Visibility="{Binding Visibility, ElementName=Toolbar}"
-                Background="{ThemeResource SystemControlForegroundBaseLowBrush}"/>
+                Background="{ThemeResource TabViewBorderBrush}"/>
 
         <!-- 加载进度环 -->
         <ProgressRing x:Name="LoadingRing" Grid.Row="1"

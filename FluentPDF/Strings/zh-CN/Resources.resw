@@ -68,6 +68,11 @@
   <data name="Settings_SoundCard.Description" xml:space="preserve"><value>控制应用中的交互提示音</value></data>
   <data name="Settings_NavCard.Header" xml:space="preserve"><value>导航栏位置</value></data>
   <data name="Settings_NavCard.Description" xml:space="preserve"><value>选择要显示的导航栏位置</value></data>
+  <data name="StartupGroup.Text" xml:space="preserve"><value>启动行为</value></data>
+  <data name="Settings_ShowWelcomeCard.Header" xml:space="preserve"><value>启动时显示欢迎页</value></data>
+  <data name="Settings_ShowWelcomeCard.Description" xml:space="preserve"><value>直接启动应用时显示欢迎标签（通过文件打开时始终不显示）</value></data>
+  <data name="Settings_AllowCloseWelcomeCard.Header" xml:space="preserve"><value>打开文件后允许关闭欢迎页</value></data>
+  <data name="Settings_AllowCloseWelcomeCard.Description" xml:space="preserve"><value>打开其他文件后，欢迎标签将变为可关闭</value></data>
   <data name="AboutGroup.Text" xml:space="preserve"><value>关于</value></data>
   <data name="GithubLink.Text" xml:space="preserve"><value>GitHub 仓库</value></data>
 

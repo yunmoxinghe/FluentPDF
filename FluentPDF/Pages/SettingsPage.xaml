@@ -66,6 +66,27 @@
                 </controls:SettingsCard>
             </StackPanel>
 
+            <!-- 启动行为 -->
+            <StackPanel Spacing="3">
+                <TextBlock x:Uid="StartupGroup" FontSize="14" Margin="0,0,0,6" FontWeight="SemiBold"/>
+                <controls:SettingsCard x:Uid="Settings_ShowWelcomeCard" HorizontalAlignment="Stretch"
+                                       HorizontalContentAlignment="Stretch" MinHeight="70" Padding="16,0">
+                    <controls:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE80F;"/>
+                    </controls:SettingsCard.HeaderIcon>
+                    <ToggleSwitch x:Name="ShowWelcomeToggle" HorizontalAlignment="Right"
+                                  Toggled="ShowWelcomeToggle_Toggled"/>
+                </controls:SettingsCard>
+                <controls:SettingsCard x:Uid="Settings_AllowCloseWelcomeCard" HorizontalAlignment="Stretch"
+                                       HorizontalContentAlignment="Stretch" MinHeight="70" Padding="16,0">
+                    <controls:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE711;"/>
+                    </controls:SettingsCard.HeaderIcon>
+                    <ToggleSwitch x:Name="AllowCloseWelcomeToggle" HorizontalAlignment="Right"
+                                  Toggled="AllowCloseWelcomeToggle_Toggled"/>
+                </controls:SettingsCard>
+            </StackPanel>
+
             <!-- 关于 -->
             <StackPanel Spacing="3">
                 <TextBlock x:Uid="AboutGroup" FontSize="14" Margin="0,0,0,6" FontWeight="SemiBold"/>

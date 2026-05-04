@@ -18,10 +18,19 @@ namespace FluentPDF
     {
         public static MainPage? Instance { get; private set; }
 
+        // 标记本次启动是否由文件关联触发（跳过欢迎页）
+        private bool _launchedByFile = false;
+
         public MainPage()
         {
             this.InitializeComponent();
             Instance = this;
+        }
+
+        protected override void OnNavigatedTo(Windows.UI.Xaml.Navigation.NavigationEventArgs e)
+        {
+            base.OnNavigatedTo(e);
+            _launchedByFile = e.Parameter is string p && p == "fileActivated";
         }
 
         private void MainPage_Loaded(object sender, RoutedEventArgs e)
@@ -31,7 +40,9 @@ namespace FluentPDF
             if (Window.Current.Content is Windows.UI.Xaml.FrameworkElement rootEl)
                 rootEl.ActualThemeChanged += (s, args) => AppThemeManager.CustomizeTitleBar();
 
-            AddWelcomeTab();
+            // 文件关联启动时不显示欢迎页；普通启动根据设置决定
+            if (!_launchedByFile && SettingsManager.Instance.ShowWelcomeOnLaunch)
+                AddWelcomeTab();
         }
 
         private void CustomDragRegion_Loaded(object sender, RoutedEventArgs e)
@@ -132,12 +143,20 @@ namespace FluentPDF
             PdfTabView.TabItems.Add(tab);
             PdfTabView.SelectedItem = tab;
 
-            // 如果之前只有欢迎标签，把它移除
+            // 找到欢迎标签
             var welcome = PdfTabView.TabItems
                 .OfType<TabViewItem>()
                 .FirstOrDefault(t => t.Content is WelcomePage);
+
             if (welcome != null)
-                PdfTabView.TabItems.Remove(welcome);
+            {
+                if (SettingsManager.Instance.AllowCloseWelcomeWhenFileOpen)
+                {
+                    // 允许关闭：把欢迎标签变为可关闭，但不自动移除
+                    welcome.IsClosable = true;
+                }
+                // 若不允许关闭，保持原样（IsClosable = false）
+            }
         }
 
         private static void LoadFileIntoTab(TabViewItem tab, StorageFile file)
@@ -157,7 +176,7 @@ namespace FluentPDF
             TabViewTabCloseRequestedEventArgs args)
         {
             sender.TabItems.Remove(args.Tab);
-            if (sender.TabItems.Count == 0)
+            if (sender.TabItems.Count == 0 && SettingsManager.Instance.ShowWelcomeOnLaunch)
                 AddWelcomeTab();
         }
 

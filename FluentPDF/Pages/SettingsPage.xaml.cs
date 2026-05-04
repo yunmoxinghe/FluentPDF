@@ -36,6 +36,8 @@ namespace FluentPDF.Pages
             RbTheme.SelectedIndex = s.AppTheme switch { "Light" => 1, "Dark" => 2, _ => 0 };
             RbMaterial.SelectedIndex = s.AppMaterial == "Acrylic" ? 1 : 0;
             SoundToggle.IsOn = s.EnableSound;
+            ShowWelcomeToggle.IsOn = s.ShowWelcomeOnLaunch;
+            AllowCloseWelcomeToggle.IsOn = s.AllowCloseWelcomeWhenFileOpen;
         }
 
         private void LoadAppInfo()
@@ -84,6 +86,18 @@ private void SoundToggle_Toggled(object sender, RoutedEventArgs e)
             if (_isInitializing) return;
             SettingsManager.Instance.EnableSound = SoundToggle.IsOn;
             MainPage.Instance?.ApplySettings();
+        }
+
+        private void ShowWelcomeToggle_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing) return;
+            SettingsManager.Instance.ShowWelcomeOnLaunch = ShowWelcomeToggle.IsOn;
+        }
+
+        private void AllowCloseWelcomeToggle_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing) return;
+            SettingsManager.Instance.AllowCloseWelcomeWhenFileOpen = AllowCloseWelcomeToggle.IsOn;
         }
     }
 }

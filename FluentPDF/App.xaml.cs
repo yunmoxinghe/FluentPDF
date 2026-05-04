@@ -53,7 +53,7 @@ namespace FluentPDF
             }
 
             if (rootFrame.Content == null)
-                rootFrame.Navigate(typeof(MainPage));
+                rootFrame.Navigate(typeof(MainPage), "fileActivated");
 
             Window.Current.Activate();
 
@@ -270,6 +270,16 @@ namespace FluentPDF
             get => _settings.EnableSound;
             set { _settings.EnableSound = value; SaveSettings(); }
         }
+        public bool ShowWelcomeOnLaunch
+        {
+            get => _settings.ShowWelcomeOnLaunch;
+            set { _settings.ShowWelcomeOnLaunch = value; SaveSettings(); }
+        }
+        public bool AllowCloseWelcomeWhenFileOpen
+        {
+            get => _settings.AllowCloseWelcomeWhenFileOpen;
+            set { _settings.AllowCloseWelcomeWhenFileOpen = value; SaveSettings(); }
+        }
 
         private void SaveSettings()
         {
@@ -303,5 +313,9 @@ namespace FluentPDF
         public string AppMaterial { get; set; } = "Mica";
         public string PanePosition { get; set; } = "Left";
         public bool EnableSound { get; set; } = true;
+        /// <summary>普通启动（非文件关联）时是否显示欢迎标签</summary>
+        public bool ShowWelcomeOnLaunch { get; set; } = true;
+        /// <summary>打开其他文件后是否允许关闭欢迎标签</summary>
+        public bool AllowCloseWelcomeWhenFileOpen { get; set; } = true;
     }
 }
