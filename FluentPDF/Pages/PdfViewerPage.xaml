@@ -3,7 +3,125 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:FluentPDF.Pages"
+    xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
     Background="Transparent">
+
+    <Page.Resources>
+        <!--
+            UWP ScrollViewer 默认模板中的 ScrollingIndicatorStates 状态机
+            会在鼠标离开后把滚动条切回细条状 TouchIndicator，导致 Visible 属性失效。
+            此 Style 覆盖模板，将两个状态都固定为 MouseIndicator，
+            使滚动条始终以完整可交互形式显示。
+        -->
+        <Style x:Key="AlwaysVisibleScrollViewerStyle" TargetType="ScrollViewer">
+            <Setter Property="HorizontalScrollMode" Value="Enabled"/>
+            <Setter Property="VerticalScrollMode" Value="Enabled"/>
+            <Setter Property="IsHorizontalRailEnabled" Value="True"/>
+            <Setter Property="IsVerticalRailEnabled" Value="True"/>
+            <Setter Property="IsTabStop" Value="False"/>
+            <Setter Property="ZoomMode" Value="Enabled"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="VerticalContentAlignment" Value="Top"/>
+            <Setter Property="VerticalScrollBarVisibility" Value="Visible"/>
+            <Setter Property="HorizontalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollViewer">
+                        <Border BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="ScrollingIndicatorStates">
+                                    <!-- 触摸时也用 MouseIndicator，保持滚动条始终展开 -->
+                                    <VisualState x:Name="TouchIndicator">
+                                        <Storyboard>
+                                            <ObjectAnimationUsingKeyFrames Duration="0"
+                                                Storyboard.TargetProperty="IndicatorMode"
+                                                Storyboard.TargetName="VerticalScrollBar">
+                                                <DiscreteObjectKeyFrame KeyTime="0">
+                                                    <DiscreteObjectKeyFrame.Value>
+                                                        <ScrollingIndicatorMode>MouseIndicator</ScrollingIndicatorMode>
+                                                    </DiscreteObjectKeyFrame.Value>
+                                                </DiscreteObjectKeyFrame>
+                                            </ObjectAnimationUsingKeyFrames>
+                                            <ObjectAnimationUsingKeyFrames Duration="0"
+                                                Storyboard.TargetProperty="IndicatorMode"
+                                                Storyboard.TargetName="HorizontalScrollBar">
+                                                <DiscreteObjectKeyFrame KeyTime="0">
+                                                    <DiscreteObjectKeyFrame.Value>
+                                                        <ScrollingIndicatorMode>MouseIndicator</ScrollingIndicatorMode>
+                                                    </DiscreteObjectKeyFrame.Value>
+                                                </DiscreteObjectKeyFrame>
+                                            </ObjectAnimationUsingKeyFrames>
+                                        </Storyboard>
+                                    </VisualState>
+                                    <VisualState x:Name="MouseIndicator">
+                                        <Storyboard>
+                                            <ObjectAnimationUsingKeyFrames Duration="0"
+                                                Storyboard.TargetProperty="IndicatorMode"
+                                                Storyboard.TargetName="VerticalScrollBar">
+                                                <DiscreteObjectKeyFrame KeyTime="0">
+                                                    <DiscreteObjectKeyFrame.Value>
+                                                        <ScrollingIndicatorMode>MouseIndicator</ScrollingIndicatorMode>
+                                                    </DiscreteObjectKeyFrame.Value>
+                                                </DiscreteObjectKeyFrame>
+                                            </ObjectAnimationUsingKeyFrames>
+                                            <ObjectAnimationUsingKeyFrames Duration="0"
+                                                Storyboard.TargetProperty="IndicatorMode"
+                                                Storyboard.TargetName="HorizontalScrollBar">
+                                                <DiscreteObjectKeyFrame KeyTime="0">
+                                                    <DiscreteObjectKeyFrame.Value>
+                                                        <ScrollingIndicatorMode>MouseIndicator</ScrollingIndicatorMode>
+                                                    </DiscreteObjectKeyFrame.Value>
+                                                </DiscreteObjectKeyFrame>
+                                            </ObjectAnimationUsingKeyFrames>
+                                        </Storyboard>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <Grid Background="{TemplateBinding Background}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <ScrollContentPresenter x:Name="ScrollContentPresenter"
+                                    Grid.ColumnSpan="2" Grid.RowSpan="2"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    Margin="{TemplateBinding Padding}"/>
+                                <ScrollBar x:Name="VerticalScrollBar"
+                                    Grid.Column="1" Grid.Row="0"
+                                    HorizontalAlignment="Right"
+                                    IsTabStop="False"
+                                    Maximum="{TemplateBinding ScrollableHeight}"
+                                    Orientation="Vertical"
+                                    Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"
+                                    Value="{TemplateBinding VerticalOffset}"
+                                    ViewportSize="{TemplateBinding ViewportHeight}"/>
+                                <ScrollBar x:Name="HorizontalScrollBar"
+                                    Grid.Column="0" Grid.Row="1"
+                                    IsTabStop="False"
+                                    Maximum="{TemplateBinding ScrollableWidth}"
+                                    Orientation="Horizontal"
+                                    Visibility="{TemplateBinding ComputedHorizontalScrollBarVisibility}"
+                                    Value="{TemplateBinding HorizontalOffset}"
+                                    ViewportSize="{TemplateBinding ViewportWidth}"/>
+                                <Border x:Name="ScrollBarSeparator"
+                                    Grid.Column="1" Grid.Row="1"
+                                    Background="{ThemeResource SystemControlPageBackgroundChromeLowBrush}"/>
+                            </Grid>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Page.Resources>
 
     <Grid>
         <Grid.RowDefinitions>
@@ -14,6 +132,7 @@
         <!-- 工具栏 -->
         <CommandBar Grid.Row="0"
                     x:Name="Toolbar"
+                    Visibility="Collapsed"
                     DefaultLabelPosition="Right"
                     Background="Transparent"
                     HorizontalAlignment="Left">
@@ -29,36 +148,40 @@
 
         <!-- PDF 内容 -->
         <ScrollViewer x:Name="PdfScrollViewer" Grid.Row="1"
+                      Style="{StaticResource AlwaysVisibleScrollViewerStyle}"
                       Visibility="Collapsed"
-                      VerticalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Visible"
                       HorizontalScrollBarVisibility="Auto"
                       ZoomMode="Enabled"
                       MinZoomFactor="0.25"
                       MaxZoomFactor="4.0"
+                      IsDeferredScrollingEnabled="False"
                       SizeChanged="PdfScrollViewer_SizeChanged">
-            <Grid x:Name="PagesHost">
-                <ItemsControl x:Name="PagesControl" HorizontalAlignment="Center">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <StackPanel Orientation="Vertical"/>
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
+            <Grid x:Name="PagesHost" HorizontalAlignment="Stretch">
+                <muxc:ItemsRepeater x:Name="PagesRepeater"
+                                    HorizontalAlignment="Center">
+                    <muxc:ItemsRepeater.Layout>
+                        <muxc:StackLayout Orientation="Vertical" Spacing="16"/>
+                    </muxc:ItemsRepeater.Layout>
+                    <muxc:ItemsRepeater.ItemTemplate>
                         <DataTemplate x:DataType="local:PdfPageItem">
-                            <Grid Margin="8,8,8,8"
-                                  Width="{x:Bind DisplayWidth, Mode=OneWay}"
+                            <Grid Width="{x:Bind DisplayWidth, Mode=OneWay}"
                                   Height="{x:Bind DisplayHeight, Mode=OneWay}"
                                   Background="{ThemeResource SystemControlBackgroundBaseLowBrush}">
-                                <ProgressRing IsActive="{x:Bind IsFirstLoad, Mode=OneWay}"
-                                              Width="32" Height="32"
-                                              HorizontalAlignment="Center"
-                                              VerticalAlignment="Center"/>
-                                <Image Source="{x:Bind PageImage, Mode=OneWay}"
-                                       Stretch="Fill"/>
+                                <!--
+                                    双层渲染架构（从下到上）：
+                                    Layer1: 单页缩略图（中等分辨率，后台预渲染）
+                                    Layer2: 高分辨率图（按需渲染，可见区优先）
+                                    双缓冲：每层都有 Back/Front 两个 Image，切换时无空白帧
+                                -->
+                                <Image Source="{x:Bind Layer1Back,  Mode=OneWay}" Stretch="Fill"/>
+                                <Image Source="{x:Bind Layer1Front, Mode=OneWay}" Stretch="Fill"/>
+                                <Image Source="{x:Bind Layer2Back,  Mode=OneWay}" Stretch="Fill"/>
+                                <Image Source="{x:Bind Layer2Front, Mode=OneWay}" Stretch="Fill"/>
                             </Grid>
                         </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                    </muxc:ItemsRepeater.ItemTemplate>
+                </muxc:ItemsRepeater>
             </Grid>
         </ScrollViewer>
     </Grid>

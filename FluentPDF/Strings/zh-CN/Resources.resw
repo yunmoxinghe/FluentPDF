@@ -50,6 +50,7 @@
   <data name="ZoomOut.Label" xml:space="preserve"><value>缩小</value></data>
   <data name="ZoomIn.Label" xml:space="preserve"><value>放大</value></data>
   <data name="ZoomFit.Label" xml:space="preserve"><value>适合宽度</value></data>
+  <data name="FullScreen.Label" xml:space="preserve"><value>全屏</value></data>
 
   <!-- 设置页 -->
   <data name="AppearanceGroup.Text" xml:space="preserve"><value>外观</value></data>
@@ -78,4 +79,7 @@
 
   <!-- 面包屑 -->
   <data name="Settings_Breadcrumb" xml:space="preserve"><value>设置</value></data>
+
+  <!-- 拖拽 -->
+  <data name="DragDrop_OpenPDF" xml:space="preserve"><value>打开 PDF</value></data>
 </root>

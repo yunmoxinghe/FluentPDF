@@ -3,7 +3,10 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
-    Loaded="MainPage_Loaded">
+    Loaded="MainPage_Loaded"
+    AllowDrop="True"
+    DragOver="MainPage_DragOver"
+    Drop="MainPage_Drop">
 
     <Grid Background="Transparent">
         <muxc:TabView x:Name="PdfTabView"

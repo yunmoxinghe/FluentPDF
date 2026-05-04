@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Linq;
 using Windows.ApplicationModel.Core;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
 using Windows.Storage.Pickers;
 using Windows.UI.Core;
@@ -120,16 +122,6 @@ namespace FluentPDF
 
         public void OpenFileInNewTab(StorageFile file)
         {
-            // 如果当前只有欢迎标签，直接替换
-            if (PdfTabView.TabItems.Count == 1 &&
-                PdfTabView.TabItems[0] is TabViewItem first &&
-                first.Content is WelcomePage)
-            {
-                first.IsClosable = true;
-                LoadFileIntoTab(first, file);
-                return;
-            }
-
             var tab = new TabViewItem
             {
                 Header = file.DisplayName,
@@ -139,6 +131,13 @@ namespace FluentPDF
             LoadFileIntoTab(tab, file);
             PdfTabView.TabItems.Add(tab);
             PdfTabView.SelectedItem = tab;
+
+            // 如果之前只有欢迎标签，把它移除
+            var welcome = PdfTabView.TabItems
+                .OfType<TabViewItem>()
+                .FirstOrDefault(t => t.Content is WelcomePage);
+            if (welcome != null)
+                PdfTabView.TabItems.Remove(welcome);
         }
 
         private static void LoadFileIntoTab(TabViewItem tab, StorageFile file)
@@ -170,8 +169,49 @@ namespace FluentPDF
                 SuggestedStartLocation = PickerLocationId.DocumentsLibrary
             };
             picker.FileTypeFilter.Add(".pdf");
-            StorageFile? file = await picker.PickSingleFileAsync();
-            if (file != null) OpenFileInNewTab(file);
+            var files = await picker.PickMultipleFilesAsync();
+            foreach (var file in files)
+                OpenFileInNewTab(file);
+        }
+
+        // ── 拖拽支持 ──────────────────────────────────────────────
+
+        private void MainPage_DragOver(object sender, DragEventArgs e)
+        {
+            // 检查是否包含文件，且至少有一个 PDF
+            if (e.DataView.Contains(StandardDataFormats.StorageItems))
+            {
+                e.AcceptedOperation = DataPackageOperation.Copy;
+                e.DragUIOverride.Caption = GetString("DragDrop_OpenPDF");
+                e.DragUIOverride.IsGlyphVisible = true;
+                e.DragUIOverride.IsCaptionVisible = true;
+            }
+            else
+            {
+                e.AcceptedOperation = DataPackageOperation.None;
+            }
+        }
+
+        private async void MainPage_Drop(object sender, DragEventArgs e)
+        {
+            if (!e.DataView.Contains(StandardDataFormats.StorageItems)) return;
+
+            var deferral = e.GetDeferral();
+            try
+            {
+                var items = await e.DataView.GetStorageItemsAsync();
+                var pdfFiles = items
+                    .OfType<StorageFile>()
+                    .Where(f => f.FileType.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                foreach (var file in pdfFiles)
+                    OpenFileInNewTab(file);
+            }
+            finally
+            {
+                deferral.Complete();
+            }
         }
 
         public async void OpenExternalLink(object sender, RoutedEventArgs e)
