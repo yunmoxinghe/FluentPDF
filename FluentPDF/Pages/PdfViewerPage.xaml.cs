@@ -121,6 +121,15 @@ namespace FluentPDF.Pages
         // ── DPI ───────────────────────────────────────────────────
         private double _dpiScale = 1.0;
 
+        // ── CheckAndPreemptForViewport dirty flag ─────────────────
+        // Layer2 状态变化时置 true，避免每帧都扫可见页
+        private bool _viewportLayer2Dirty = true;
+
+        // ── 上一次 Layer2 渲染的预加载边界 ───────────────────────
+        // 只有边界收缩时才需要 evict，避免每帧对全部页面遍历
+        private int _lastEvictFrom = -1;
+        private int _lastEvictTo   = -1;
+
         private StorageFile? _pendingFile;
 
         public PdfViewerPage()
@@ -128,6 +137,12 @@ namespace FluentPDF.Pages
             this.InitializeComponent();
             PagesRepeater.ItemsSource = _pages;
             PdfScrollViewer.ViewChanged += OnViewChanged;
+            _pages.CollectionChanged += (_, e) =>
+            {
+                if (e.NewItems == null) return;
+                foreach (PdfPageItem item in e.NewItems)
+                    item.RequestFadeTick = RequestFadeTick;
+            };
 
             // 读取屏幕 DPI 缩放比例，用于渲染时对齐物理像素
             var di = Windows.Graphics.Display.DisplayInformation.GetForCurrentView();
@@ -263,14 +278,15 @@ namespace FluentPDF.Pages
                 }
                 PdfScrollViewer.LayoutUpdated += OnFirstLayout;
 
-                // 后台补全剩余页元数据
+                // 后台补全剩余页元数据，不 await——让 Layer1 立即启动，
+                // 元数据任务自己在完成后调 ResumeBackgroundLayer1 补一次。
                 if (doc.PageCount > 1)
                 {
                     _metaCts = new CancellationTokenSource();
-                    await LoadRemainingMetaAsync(doc, _metaCts.Token);
+                    _ = LoadRemainingMetaAsync(doc, _metaCts.Token);
                 }
 
-                // 启动后台 Layer1 缩略图渲染
+                // 立即启动后台 Layer1 缩略图渲染（不等元数据全部到位）
                 StartBackgroundLayer1();
             }
             catch (Exception ex)
@@ -285,12 +301,14 @@ namespace FluentPDF.Pages
             }
         }
 
-        // Fix: 增加 CancellationToken 参数，切换文件时旧任务能及时退出，
-        //      避免向新文档的 _pages 写入旧数据。
+        // 串行读取剩余页的尺寸元数据。
+        // WinRT PdfDocument.GetPage() 绑定在 UI 线程的 STA 上，不能跨线程并发调用。
+        // 按批次写入 _pages，每批通过低优先级 RunAsync 让出 UI 线程，完成后补一次 Layer1。
         private async Task LoadRemainingMetaAsync(PdfDocument doc, CancellationToken token)
         {
             const int batchSize = 20;
             var batch = new List<PdfPageItem>(batchSize);
+
             for (uint i = 1; i < doc.PageCount; i++)
             {
                 if (token.IsCancellationRequested) return;
@@ -301,6 +319,7 @@ namespace FluentPDF.Pages
                     DisplayWidth  = page.Size.Width,
                     DisplayHeight = page.Size.Height,
                 });
+
                 if (batch.Count >= batchSize || i == doc.PageCount - 1)
                 {
                     var toAdd = batch.ToArray(); batch.Clear();
@@ -309,9 +328,12 @@ namespace FluentPDF.Pages
                         if (token.IsCancellationRequested) return;
                         foreach (var item in toAdd) _pages.Add(item);
                     });
-                    await Task.Yield();
                 }
             }
+
+            // 元数据全部到位后，补一次 Layer1 确保新增页也被覆盖
+            if (!token.IsCancellationRequested)
+                ResumeBackgroundLayer1();
         }
 
         // ── 后台 Layer1 渲染 ──────────────────────────────────────
@@ -367,7 +389,7 @@ namespace FluentPDF.Pages
                 catch (OperationCanceledException) { return; }
                 catch { }
 
-                await Task.Yield();
+                await Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Low, () => { });
             }
         }
 
@@ -383,6 +405,32 @@ namespace FluentPDF.Pages
                 if (i < (uint)Math.Max(0, first) || i > (uint)Math.Min(_pages.Count - 1, last))
                     order.Add(i);
             return order;
+        }
+
+        // ── 全局淡入 Timer ────────────────────────────────────────
+        // 单个 DispatcherTimer 驱动所有页面的淡入，避免每页一个 timer 的开销。
+        // 只有存在活跃淡入时才运行，完成后自动停止。
+        private DispatcherTimer? _globalFadeTimer;
+        private static readonly TimeSpan FadeInterval = TimeSpan.FromMilliseconds(16);
+
+        internal void RequestFadeTick()
+        {
+            if (_globalFadeTimer == null)
+            {
+                _globalFadeTimer = new DispatcherTimer { Interval = FadeInterval };
+                _globalFadeTimer.Tick += OnGlobalFadeTick;
+            }
+            if (!_globalFadeTimer.IsEnabled)
+                _globalFadeTimer.Start();
+        }
+
+        private void OnGlobalFadeTick(object? sender, object e)
+        {
+            bool anyActive = false;
+            foreach (var item in _pages)
+                if (item.TickFade()) anyActive = true;
+            if (!anyActive)
+                _globalFadeTimer!.Stop();
         }
 
         // ── 缩放控件 ──────────────────────────────────────────────
@@ -505,6 +553,9 @@ namespace FluentPDF.Pages
         private void CheckAndPreemptForViewport()
         {
             if (_doc == null || _pages.Count == 0) return;
+            // dirty flag：只有可见页 Layer2 状态可能变化时才扫描，避免每帧 O(n) 遍历
+            if (!_viewportLayer2Dirty) return;
+
             var (first, last) = GetVisibleRange();
             if (first < 0) return;
 
@@ -515,18 +566,22 @@ namespace FluentPDF.Pages
                 if (!_pages[i].IsLayer2Ready) { needsLayer2 = true; break; }
             }
 
-            if (needsLayer2)
+            if (!needsLayer2)
             {
-                // 只取消 Layer1，让出渲染资源给即将到来的 Layer2
-                // 不在这里触发 ScheduleLayer2 —— 滚动过程中触发只会被下一帧立刻 cancel
-                // Layer2 由 debounce（滚动停止后）统一触发，避免无限 cancel 循环
-                _layer1Cts?.Cancel();
-                _layer1Cts = null;
+                // 可见页全部就绪，清除 dirty，后续帧跳过扫描
+                _viewportLayer2Dirty = false;
+                return;
             }
+
+            // 只取消 Layer1，让出渲染资源给即将到来的 Layer2
+            _layer1Cts?.Cancel();
+            _layer1Cts = null;
         }
 
         private void ScheduleLayer2()
         {
+            // 新一轮渲染开始，可见页 Layer2 状态可能变化，重置 dirty
+            _viewportLayer2Dirty = true;
             _layer2Cts?.Cancel();
             _layer2Cts = new CancellationTokenSource();
             _ = RenderLayer2Async(_layer2Cts.Token);
@@ -576,9 +631,19 @@ namespace FluentPDF.Pages
             var order      = BuildRenderOrder(center, from, to);
             int zoomBucket = ZoomToBucket((float)renderScale);
 
-            for (int i = 0; i < _pages.Count; i++)
-                if (i < from || i > to)
+            // ── 按需 Evict：只在预加载窗口收缩时才遍历 ──────────
+            // 窗口扩大或不变时跳过，避免每次渲染都对全部页面 O(n) 扫描。
+            if (_lastEvictFrom >= 0)
+            {
+                // 左侧新增的窗口外区间：[_lastEvictFrom, from-1]
+                for (int i = _lastEvictFrom; i < from && i < _pages.Count; i++)
                     _pages[i].EvictLayer2(_layer1Cache);
+                // 右侧新增的窗口外区间：[to+1, _lastEvictTo]
+                for (int i = to + 1; i <= _lastEvictTo && i < _pages.Count; i++)
+                    _pages[i].EvictLayer2(_layer1Cache);
+            }
+            _lastEvictFrom = from;
+            _lastEvictTo   = to;
 
             // ── 第一轮：可见区，批量渲染 + 合帧 ─────────────────
             var visibleOrder = new List<int>();
@@ -770,8 +835,10 @@ namespace FluentPDF.Pages
             return (first, last);
         }
 
-        private static int ZoomToBucket(float zoom)
-            => (int)Math.Round(zoom / 0.25f);
+        // bucket 粒度 0.25：基于已乘 DPI 的 renderScale，
+        // 缩放差 < 0.125 时复用同一缓存，高 DPI 屏命中率更高
+        private static int ZoomToBucket(float renderScale)
+            => (int)Math.Round(renderScale / 0.25f);
 
         private static List<int> BuildRenderOrder(int center, int from, int to)
         {
@@ -791,6 +858,9 @@ namespace FluentPDF.Pages
             _layer2Cts?.Cancel(); _layer2Cts = null;
             _layer1Cts?.Cancel(); _layer1Cts = null;
             _metaCts?.Cancel();   _metaCts   = null;
+            // 重置 evict 边界，防止旧文档边界污染新文档的首次渲染
+            _lastEvictFrom = -1;
+            _lastEvictTo   = -1;
         }
 
         public bool TryGetThumb(uint pageIndex, out BitmapImage? thumb)
@@ -805,113 +875,101 @@ namespace FluentPDF.Pages
         public double DisplayWidth  { get; set; }
         public double DisplayHeight { get; set; }
 
+        // ── 静态 PropertyChangedEventArgs 缓存 ───────────────────
+        // 避免每次属性变化都 new，减少高频滚动时的 GC 压力
+        private static readonly PropertyChangedEventArgs s_l1BackArgs    = new(nameof(Layer1Back));
+        private static readonly PropertyChangedEventArgs s_l1FrontArgs   = new(nameof(Layer1Front));
+        private static readonly PropertyChangedEventArgs s_l2BackArgs    = new(nameof(Layer2Back));
+        private static readonly PropertyChangedEventArgs s_l2FrontArgs   = new(nameof(Layer2Front));
+        private static readonly PropertyChangedEventArgs s_l2OpacityArgs = new(nameof(Layer2Opacity));
+
         // ── 双层各自的双缓冲 ──────────────────────────────────────
         private BitmapImage? _l1Back,  _l1Front;
         private BitmapImage? _l2Back,  _l2Front;
 
-        public BitmapImage? Layer1Back  { get => _l1Back;  private set { _l1Back  = value; Notify(nameof(Layer1Back));  } }
-        public BitmapImage? Layer1Front { get => _l1Front; private set { _l1Front = value; Notify(nameof(Layer1Front)); } }
-        public BitmapImage? Layer2Back  { get => _l2Back;  private set { _l2Back  = value; Notify(nameof(Layer2Back));  } }
-        public BitmapImage? Layer2Front { get => _l2Front; private set { _l2Front = value; Notify(nameof(Layer2Front)); } }
+        public BitmapImage? Layer1Back  { get => _l1Back;  private set { _l1Back  = value; PropertyChanged?.Invoke(this, s_l1BackArgs);  } }
+        public BitmapImage? Layer1Front { get => _l1Front; private set { _l1Front = value; PropertyChanged?.Invoke(this, s_l1FrontArgs); } }
+        public BitmapImage? Layer2Back  { get => _l2Back;  private set { _l2Back  = value; PropertyChanged?.Invoke(this, s_l2BackArgs);  } }
+        public BitmapImage? Layer2Front { get => _l2Front; private set { _l2Front = value; PropertyChanged?.Invoke(this, s_l2FrontArgs); } }
 
-        // ── Layer2 淡入透明度 ─────────────────────────────────────
-        // 绑定到 Layer2Front Image 的 Opacity，SetLayer2 时从 0 动画到 1。
+        // ── Layer2 淡入透明度（绑定到 Layer2Front Image 的 Opacity） ──
         private double _layer2Opacity = 1.0;
         public  double Layer2Opacity
         {
             get => _layer2Opacity;
-            private set { _layer2Opacity = value; Notify(nameof(Layer2Opacity)); }
+            private set { _layer2Opacity = value; PropertyChanged?.Invoke(this, s_l2OpacityArgs); }
         }
 
-        // 淡入计时器：用 DispatcherTimer 驱动逐帧插值，避免引入 Storyboard 依赖
-        private DispatcherTimer? _fadeTimer;
-        private double           _fadeElapsedMs;
-        private const double     FadeDurationMs = 150.0;
-        // DispatcherTimer 最小间隔约 16ms（60fps），用 16ms 逼近帧率
-        private static readonly TimeSpan FadeInterval = TimeSpan.FromMilliseconds(16);
+        // ── 淡入状态（由全局 timer 驱动，无需每页一个 timer） ────
+        private double _fadeElapsedMs;
+        private bool   _fading;
+        private const double FadeDurationMs = 150.0;
+
+        // 由 PdfViewerPage 注入，用于在 SetLayer2 时启动全局 timer
+        internal Action? RequestFadeTick;
 
         public bool HasLayer1     => _l1Front != null;
         public bool IsLayer2Ready => _l2Front != null;
 
         public void SetLayer1(BitmapImage bmp)
         {
-            // Layer1 不需要淡入，直接替换；旧图不保留（Layer1 只作兜底，不需要双缓冲）
             Layer1Back  = null;
             Layer1Front = bmp;
         }
 
         public void SetLayer2(BitmapImage bmp)
         {
-            // 把当前 front 移到 back 作为淡入期间的兜底，再写入新图
             if (_l2Front != null)
-            {
                 Layer2Back = _l2Front;
-            }
-            Layer2Front = bmp;
-            StartFadeIn();
-        }
-
-        // ── 淡入动画 ──────────────────────────────────────────────
-        private void StartFadeIn()
-        {
-            // 停掉上一次还没跑完的淡入
-            _fadeTimer?.Stop();
+            Layer2Front    = bmp;
             _fadeElapsedMs = 0;
+            _fading        = true;
             Layer2Opacity  = 0.0;
-
-            _fadeTimer = new DispatcherTimer { Interval = FadeInterval };
-            _fadeTimer.Tick += OnFadeTick;
-            _fadeTimer.Start();
+            RequestFadeTick?.Invoke(); // 通知全局 timer 启动
         }
 
-        private void OnFadeTick(object? sender, object e)
+        /// <summary>
+        /// 由全局 DispatcherTimer 每帧调用，推进淡入动画。
+        /// 返回 true 表示仍在淡入中，false 表示已完成。
+        /// </summary>
+        internal bool TickFade()
         {
-            _fadeElapsedMs += FadeInterval.TotalMilliseconds;
+            if (!_fading) return false;
+
+            _fadeElapsedMs += 16.0; // 对应 FadeInterval = 16ms
 
             if (_fadeElapsedMs >= FadeDurationMs)
             {
-                _fadeTimer!.Stop();
-                _fadeTimer    = null;
+                _fading       = false;
                 Layer2Opacity = 1.0;
-                Layer2Back    = null;   // 淡入完成，旧图不再需要，释放内存
-                return;
+                Layer2Back    = null; // 淡入完成，释放 Back 缓冲
+                return false;
             }
 
-            // ease-out cubic：t' = 1 - (1-t)^3，视觉上快速出现、尾部平滑
+            // ease-out cubic：t' = 1 - (1-t)^3
             double t  = _fadeElapsedMs / FadeDurationMs;
             double t1 = 1.0 - t;
             Layer2Opacity = 1.0 - t1 * t1 * t1;
+            return true;
         }
 
-        /// <summary>
-        /// 释放 Layer2，回退到下方的 Layer1 显示。
-        /// Fix: 简化判断——只要 Layer1 已就绪（字段或缓存任一）就清除 Layer2；
-        ///      两个条件本质相同（_l1Front 非空即已就绪），合并为一个检查。
-        /// </summary>
+        /// <summary>释放 Layer2，回退到下方的 Layer1 显示。</summary>
         public void EvictLayer2(Dictionary<uint, BitmapImage> layer1Cache)
         {
             if (_l2Front == null) return;
-            // HasLayer1 已覆盖 _l1Front != null；缓存命中说明下次 SetLayer1 会立即补上
             if (HasLayer1 || layer1Cache.ContainsKey(PageIndex))
                 ClearLayerImmediate();
-            // 否则保留 Layer2 继续兜底，等 Layer1 渲染完或新 Layer2 到来再替换
         }
 
-        /// <summary>
-        /// 清除 Layer2 双缓冲，通过属性 setter 触发 PropertyChanged 通知 UI。
-        /// </summary>
         private void ClearLayerImmediate()
         {
-            _fadeTimer?.Stop();
-            _fadeTimer    = null;
-            Layer2Opacity = 1.0;   // 下次 SetLayer2 时会重置为 0，这里恢复默认
+            _fading       = false;
+            Layer2Opacity = 1.0;
             Layer2Front   = null;
             Layer2Back    = null;
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;
-        private void Notify(string name)
-            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 
     // ── LRU 缓存 ──────────────────────────────────────────────────
