@@ -12,31 +12,16 @@
                       AddTabButtonClick="TabView_AddTabButtonClick"
                       TabCloseRequested="TabView_TabCloseRequested">
 
-            <!-- 左侧：为系统图标/左侧系统按钮留出空间 -->
             <muxc:TabView.TabStripHeader>
                 <Grid x:Name="ShellTitlebarInset" Background="Transparent"/>
             </muxc:TabView.TabStripHeader>
 
-            <!-- 右侧：仅保留系统按钮占位，不再作为 SetTitleBar 目标 -->
             <muxc:TabView.TabStripFooter>
-                <Grid x:Name="SystemButtonInset" Background="Transparent"/>
+                <Grid x:Name="CustomDragRegion"
+                      Background="Transparent"
+                      Loaded="CustomDragRegion_Loaded"/>
             </muxc:TabView.TabStripFooter>
 
         </muxc:TabView>
-
-        <!--
-            真正的拖拽区域：直接叠加在页面顶部，不受 TabView 内部 padding 影响。
-            高度在 code-behind 里跟随 PdfTabView 标签栏实际高度同步。
-        -->
-        <Grid x:Name="TitleBarDragGrid"
-              VerticalAlignment="Top"
-              HorizontalAlignment="Stretch"
-              Background="Transparent">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="LeftInsetColumn" Width="0"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition x:Name="RightInsetColumn" Width="0"/>
-            </Grid.ColumnDefinitions>
-        </Grid>
     </Grid>
 </Page>

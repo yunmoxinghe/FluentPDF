@@ -24,72 +24,48 @@ namespace FluentPDF
 
         private void MainPage_Loaded(object sender, RoutedEventArgs e)
         {
-            // 延伸内容到标题栏，并用 LayoutMetricsChanged 同步两侧占位宽度
+            AppThemeManager.CustomizeTitleBar();
+
+            if (Window.Current.Content is Windows.UI.Xaml.FrameworkElement rootEl)
+                rootEl.ActualThemeChanged += (s, args) => AppThemeManager.CustomizeTitleBar();
+
+            AddWelcomeTab();
+        }
+
+        private void CustomDragRegion_Loaded(object sender, RoutedEventArgs e)
+        {
             var coreTitleBar = CoreApplication.GetCurrentView().TitleBar;
             coreTitleBar.ExtendViewIntoTitleBar = true;
             coreTitleBar.LayoutMetricsChanged += CoreTitleBar_LayoutMetricsChanged;
 
-            // 拖动区域叠加在页面顶部，高度跟随 TabView 标签栏实际高度
-            Window.Current.SetTitleBar(TitleBarDragGrid);
-            PdfTabView.SizeChanged += (s, args) => SyncDragGridHeight();
+            UpdateTitleBarInsets(coreTitleBar);
+            Window.Current.SetTitleBar(CustomDragRegion);
 
-            // 初始同步一次
-            UpdateTitleBarLayout(coreTitleBar);
-
-            AppThemeManager.CustomizeTitleBar();
-
-            // 启动时显示欢迎标签
-            AddWelcomeTab();
-        }
-
-        // 通过可视树找到 TabView 内部的标签栏，取其实际高度同步给拖拽区
-        private void SyncDragGridHeight()
-        {
-            var tabStrip = FindTabStrip(PdfTabView);
-            if (tabStrip != null)
-                TitleBarDragGrid.Height = tabStrip.ActualHeight;
-        }
-
-        private static Windows.UI.Xaml.FrameworkElement? FindTabStrip(
-            Windows.UI.Xaml.DependencyObject parent)
-        {
-            int count = Windows.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent);
-            for (int i = 0; i < count; i++)
-            {
-                var child = Windows.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, i);
-                if (child is Windows.UI.Xaml.Controls.ListView lv &&
-                    lv.GetType().Name == "TabViewListView")
-                    return lv;
-                var result = FindTabStrip(child);
-                if (result != null) return result;
-            }
-            return null;
+            System.Diagnostics.Debug.WriteLine(
+                $"[TitleBar] CustomDragRegion actual H={CustomDragRegion.ActualHeight}, coreTitleBar.Height={coreTitleBar.Height}");
         }
 
         private void CoreTitleBar_LayoutMetricsChanged(CoreApplicationViewTitleBar sender, object args)
-            => UpdateTitleBarLayout(sender);
+            => UpdateTitleBarInsets(sender);
 
-        private void UpdateTitleBarLayout(CoreApplicationViewTitleBar coreTitleBar)
+        private void UpdateTitleBarInsets(CoreApplicationViewTitleBar coreTitleBar)
         {
-            // 根据流向决定哪侧是系统按钮
+            // 不强制设置高度，让 CustomDragRegion / ShellTitlebarInset
+            // 自然撑满 TabStripFooter / TabStripHeader 的实际高度（约48px）。
+            // coreTitleBar.Height（32px）只用于计算 inset 宽度。
+            ShellTitlebarInset.MinHeight = coreTitleBar.Height;
+            CustomDragRegion.MinHeight   = coreTitleBar.Height;
+
             if (FlowDirection == FlowDirection.LeftToRight)
             {
+                CustomDragRegion.MinWidth   = coreTitleBar.SystemOverlayRightInset;
                 ShellTitlebarInset.MinWidth = coreTitleBar.SystemOverlayLeftInset;
-                LeftInsetColumn.Width  = new GridLength(coreTitleBar.SystemOverlayLeftInset);
-                RightInsetColumn.Width = new GridLength(coreTitleBar.SystemOverlayRightInset);
-                SystemButtonInset.MinWidth = coreTitleBar.SystemOverlayRightInset;
             }
             else
             {
+                CustomDragRegion.MinWidth   = coreTitleBar.SystemOverlayLeftInset;
                 ShellTitlebarInset.MinWidth = coreTitleBar.SystemOverlayRightInset;
-                LeftInsetColumn.Width  = new GridLength(coreTitleBar.SystemOverlayRightInset);
-                RightInsetColumn.Width = new GridLength(coreTitleBar.SystemOverlayLeftInset);
-                SystemButtonInset.MinWidth = coreTitleBar.SystemOverlayLeftInset;
             }
-
-            ShellTitlebarInset.Height = coreTitleBar.Height;
-            SystemButtonInset.Height  = coreTitleBar.Height;
-            // TitleBarDragGrid 高度由 SyncDragGridHeight() 跟随标签栏实际高度，不在此设置
         }
 
         // ── 从 App.OnFileActivated 调用 ───────────────────────────
