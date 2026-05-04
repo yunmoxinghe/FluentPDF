@@ -57,9 +57,25 @@ namespace FluentPDF
 
             Window.Current.Activate();
 
-            // 把文件传给已就绪的 MainPage
-            if (rootFrame.Content is MainPage mainPage && args.Files.Count > 0)
-                mainPage.OpenFile(args.Files[0] as StorageFile);
+            // Fix: rootFrame.Navigate 是异步的，Content 在当前帧可能还是 null。
+            // 用 Navigated 事件确保 MainPage 已就绪后再传文件，避免文件丢失。
+            var file = args.Files.Count > 0 ? args.Files[0] as StorageFile : null;
+            if (file == null) return;
+
+            if (rootFrame.Content is MainPage ready)
+            {
+                ready.OpenFile(file);
+            }
+            else
+            {
+                void OnNavigated(object s, Windows.UI.Xaml.Navigation.NavigationEventArgs e)
+                {
+                    rootFrame.Navigated -= OnNavigated;
+                    if (rootFrame.Content is MainPage mainPage)
+                        mainPage.OpenFile(file);
+                }
+                rootFrame.Navigated += OnNavigated;
+            }
         }
     }
 

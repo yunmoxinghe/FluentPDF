@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.Data.Pdf;
@@ -94,6 +95,7 @@ namespace FluentPDF.Pages
         // ── 渲染任务控制 ───────────────────────────────────────────
         private CancellationTokenSource? _layer2Cts;
         private CancellationTokenSource? _layer1Cts;
+        private CancellationTokenSource? _metaCts;      // 元数据加载任务的取消令牌
         private DispatcherTimer?         _debounceTimer;
         // 弱鸡模式单任务锁：保证同一时刻只有一个渲染任务在跑
         private readonly SemaphoreSlim _renderLock = new(1, 1);
@@ -112,9 +114,9 @@ namespace FluentPDF.Pages
 
         // ── 滚动方向 & 速度追踪 ───────────────────────────────────
         private double _lastVerticalOffset  = 0;
-        private double _lastOffsetTimestamp = 0;
-        private double _scrollVelocity      = 0; // px/ms
-        private int    _scrollDirection     = 0; // +1 向下，-1 向上
+        private long   _lastOffsetTimestamp = 0;  // Stopwatch ticks，高精度
+        private double _scrollVelocity      = 0;  // px/ms
+        private int    _scrollDirection     = 0;  // +1 向下，-1 向上
 
         // ── DPI ───────────────────────────────────────────────────
         private double _dpiScale = 1.0;
@@ -184,6 +186,7 @@ namespace FluentPDF.Pages
             _pages.Clear();
             _layer2Cache.Clear();
             _layer1Cache.Clear();
+            _pageTopCache = null;   // 清除页顶坐标缓存，防止旧数据被新文档复用
             _doc = null;
 
             try
@@ -238,7 +241,10 @@ namespace FluentPDF.Pages
 
                 // 后台补全剩余页元数据
                 if (doc.PageCount > 1)
-                    await LoadRemainingMetaAsync(doc);
+                {
+                    _metaCts = new CancellationTokenSource();
+                    await LoadRemainingMetaAsync(doc, _metaCts.Token);
+                }
 
                 // 启动后台 Layer1 缩略图渲染
                 StartBackgroundLayer1();
@@ -255,12 +261,15 @@ namespace FluentPDF.Pages
             }
         }
 
-        private async Task LoadRemainingMetaAsync(PdfDocument doc)
+        // Fix: 增加 CancellationToken 参数，切换文件时旧任务能及时退出，
+        //      避免向新文档的 _pages 写入旧数据。
+        private async Task LoadRemainingMetaAsync(PdfDocument doc, CancellationToken token)
         {
             const int batchSize = 20;
             var batch = new List<PdfPageItem>(batchSize);
             for (uint i = 1; i < doc.PageCount; i++)
             {
+                if (token.IsCancellationRequested) return;
                 using PdfPage page = doc.GetPage(i);
                 batch.Add(new PdfPageItem
                 {
@@ -273,6 +282,7 @@ namespace FluentPDF.Pages
                     var toAdd = batch.ToArray(); batch.Clear();
                     await Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Low, () =>
                     {
+                        if (token.IsCancellationRequested) return;
                         foreach (var item in toAdd) _pages.Add(item);
                     });
                     await Task.Yield();
@@ -424,7 +434,9 @@ namespace FluentPDF.Pages
             double vw = PdfScrollViewer.ViewportWidth;
             double w  = vw > 0 ? vw : PdfScrollViewer.ActualWidth;
             PagesHost.MinWidth = w;
-            PagesHost.Width    = double.NaN; // Auto
+            // 只在需要时清除固定宽度，避免每次 SizeChanged 都触发额外布局重算
+            if (!double.IsNaN(PagesHost.Width))
+                PagesHost.Width = double.NaN; // Auto
         }
 
         // ── 视图变化调度 ──────────────────────────────────────────
@@ -432,9 +444,11 @@ namespace FluentPDF.Pages
         private void OnViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
         {
             // 计算滚动速度（px/ms）和方向
+            // 使用 Stopwatch 高精度时间戳，避免 TickCount64 在高帧率下精度不足
             double currentOffset = PdfScrollViewer.VerticalOffset;
-            double now           = Environment.TickCount64;
-            double dt            = now - _lastOffsetTimestamp;
+            long   nowTicks      = Stopwatch.GetTimestamp();
+            double dt            = (nowTicks - _lastOffsetTimestamp)
+                                   * 1000.0 / Stopwatch.Frequency; // 转换为毫秒
             if (dt > 0 && dt < 200) // 忽略过长间隔（暂停后第一帧）
                 _scrollVelocity = (currentOffset - _lastVerticalOffset) / dt;
             else
@@ -443,20 +457,23 @@ namespace FluentPDF.Pages
             if (currentOffset > _lastVerticalOffset)      _scrollDirection = 1;
             else if (currentOffset < _lastVerticalOffset) _scrollDirection = -1;
             _lastVerticalOffset  = currentOffset;
-            _lastOffsetTimestamp = now;
+            _lastOffsetTimestamp = nowTicks;
 
             CheckAndPreemptForViewport();
 
             if (!e.IsIntermediate)
             {
                 _debounceTimer?.Stop();
-                _debounceTimer = new DispatcherTimer
-                    { Interval = TimeSpan.FromMilliseconds(DebounceMs) };
-                _debounceTimer.Tick += (s, _) =>
+                if (_debounceTimer == null)
                 {
-                    _debounceTimer!.Stop();
-                    ScheduleLayer2();
-                };
+                    _debounceTimer = new DispatcherTimer
+                        { Interval = TimeSpan.FromMilliseconds(DebounceMs) };
+                    _debounceTimer.Tick += (s, _) =>
+                    {
+                        _debounceTimer!.Stop();
+                        ScheduleLayer2();
+                    };
+                }
                 _debounceTimer.Start();
             }
         }
@@ -516,13 +533,12 @@ namespace FluentPDF.Pages
 
             int predFirst = firstVisible, predLast = lastVisible;
             {
-                double y = 0; const double sp = 16.0;
+                var tops = GetPageTops();
                 for (int i = 0; i < _pages.Count; i++)
                 {
-                    double bottom = y + _pages[i].DisplayHeight;
-                    if (bottom >= predictedViewTop && y <= predictedViewBottom)
+                    double bottom = tops[i] + _pages[i].DisplayHeight;
+                    if (bottom >= predictedViewTop && tops[i] <= predictedViewBottom)
                     { predFirst = Math.Min(i, predFirst); predLast = Math.Max(i, predLast); }
-                    y = bottom + sp;
                 }
             }
 
@@ -676,6 +692,30 @@ namespace FluentPDF.Pages
 
         // ── 工具方法 ──────────────────────────────────────────────
 
+        // ── 页面 Y 坐标索引（用于二分查找） ──────────────────────
+        // 每次 _pages 变化后按需重建，GetVisibleRange 用它做 O(log n) 查找。
+        private double[]? _pageTopCache;   // 每页顶部 Y（未缩放内容坐标）
+        private int       _pageTopCacheVersion = -1;  // 用 int 与 _pages.Count 类型一致
+
+        private double[] GetPageTops()
+        {
+            // 用 _pages.Count 作为版本号：页数不变时复用缓存
+            if (_pageTopCache != null && _pageTopCacheVersion == _pages.Count)
+                return _pageTopCache;
+
+            const double spacing = 16.0;
+            var tops = new double[_pages.Count];
+            double y = 0;
+            for (int i = 0; i < _pages.Count; i++)
+            {
+                tops[i] = y;
+                y += _pages[i].DisplayHeight + spacing;
+            }
+            _pageTopCache        = tops;
+            _pageTopCacheVersion = _pages.Count;
+            return tops;
+        }
+
         private (int first, int last) GetVisibleRange()
         {
             if (_pages.Count == 0) return (-1, -1);
@@ -683,18 +723,25 @@ namespace FluentPDF.Pages
             double viewTop    = PdfScrollViewer.VerticalOffset / zoom;
             double viewBottom = viewTop + PdfScrollViewer.ViewportHeight / zoom;
 
-            double y = 0;
-            const double spacing = 16.0;
-            int first = -1, last = -1;
-            for (int i = 0; i < _pages.Count; i++)
+            var tops = GetPageTops();
+
+            // 二分找第一个 bottom >= viewTop 的页（即 top + height >= viewTop）
+            int lo = 0, hi = _pages.Count - 1, first = -1;
+            while (lo <= hi)
             {
-                double bottom = y + _pages[i].DisplayHeight;
-                if (bottom >= viewTop && y <= viewBottom)
-                {
-                    if (first < 0) first = i;
-                    last = i;
-                }
-                y = bottom + spacing;
+                int mid = (lo + hi) >> 1;
+                double bottom = tops[mid] + _pages[mid].DisplayHeight;
+                if (bottom >= viewTop) { first = mid; hi = mid - 1; }
+                else lo = mid + 1;
+            }
+            if (first < 0) return (-1, -1);
+
+            // 从 first 向后线性扫到 top > viewBottom（可见页通常只有几页，线性足够）
+            int last = first;
+            for (int i = first + 1; i < _pages.Count; i++)
+            {
+                if (tops[i] > viewBottom) break;
+                last = i;
             }
             return (first, last);
         }
@@ -719,6 +766,7 @@ namespace FluentPDF.Pages
             _debounceTimer?.Stop();
             _layer2Cts?.Cancel(); _layer2Cts = null;
             _layer1Cts?.Cancel(); _layer1Cts = null;
+            _metaCts?.Cancel();   _metaCts   = null;
         }
 
         public bool TryGetThumb(uint pageIndex, out BitmapImage? thumb)
@@ -734,9 +782,6 @@ namespace FluentPDF.Pages
         public double DisplayHeight { get; set; }
 
         // ── 双层各自的双缓冲 ──────────────────────────────────────
-        // 每层 Back + Front，切换时旧图留在 Back 兜底，新图写入 Front，
-        // 下一帧通过 Dispatcher.Low 清除 Back，避免任何空白帧。
-
         private BitmapImage? _l1Back,  _l1Front;
         private BitmapImage? _l2Back,  _l2Front;
 
@@ -745,26 +790,76 @@ namespace FluentPDF.Pages
         public BitmapImage? Layer2Back  { get => _l2Back;  private set { _l2Back  = value; Notify(nameof(Layer2Back));  } }
         public BitmapImage? Layer2Front { get => _l2Front; private set { _l2Front = value; Notify(nameof(Layer2Front)); } }
 
+        // ── Layer2 淡入透明度 ─────────────────────────────────────
+        // 绑定到 Layer2Front Image 的 Opacity，SetLayer2 时从 0 动画到 1。
+        private double _layer2Opacity = 1.0;
+        public  double Layer2Opacity
+        {
+            get => _layer2Opacity;
+            private set { _layer2Opacity = value; Notify(nameof(Layer2Opacity)); }
+        }
+
+        // 淡入计时器：用 DispatcherTimer 驱动逐帧插值，避免引入 Storyboard 依赖
+        private DispatcherTimer? _fadeTimer;
+        private double           _fadeElapsedMs;
+        private const double     FadeDurationMs = 150.0;
+        // DispatcherTimer 最小间隔约 16ms（60fps），用 16ms 逼近帧率
+        private static readonly TimeSpan FadeInterval = TimeSpan.FromMilliseconds(16);
+
         public bool HasLayer1     => _l1Front != null;
         public bool IsLayer2Ready => _l2Front != null;
 
         public void SetLayer1(BitmapImage bmp) => SwapLayer(bmp, ref _l1Back, ref _l1Front,
             nameof(Layer1Back), nameof(Layer1Front));
 
-        public void SetLayer2(BitmapImage bmp) => SwapLayer(bmp, ref _l2Back, ref _l2Front,
-            nameof(Layer2Back), nameof(Layer2Front));
+        public void SetLayer2(BitmapImage bmp)
+        {
+            SwapLayer(bmp, ref _l2Back, ref _l2Front, nameof(Layer2Back), nameof(Layer2Front));
+            StartFadeIn();
+        }
+
+        // ── 淡入动画 ──────────────────────────────────────────────
+        private void StartFadeIn()
+        {
+            // 停掉上一次还没跑完的淡入
+            _fadeTimer?.Stop();
+            _fadeElapsedMs = 0;
+            Layer2Opacity  = 0.0;
+
+            _fadeTimer = new DispatcherTimer { Interval = FadeInterval };
+            _fadeTimer.Tick += OnFadeTick;
+            _fadeTimer.Start();
+        }
+
+        private void OnFadeTick(object? sender, object e)
+        {
+            _fadeElapsedMs += FadeInterval.TotalMilliseconds;
+
+            if (_fadeElapsedMs >= FadeDurationMs)
+            {
+                _fadeTimer!.Stop();
+                _fadeTimer = null;
+                Layer2Opacity = 1.0;
+                return;
+            }
+
+            // ease-out cubic：t' = 1 - (1-t)^3，视觉上快速出现、尾部平滑
+            double t  = _fadeElapsedMs / FadeDurationMs;
+            double t1 = 1.0 - t;
+            Layer2Opacity = 1.0 - t1 * t1 * t1;
+        }
 
         /// <summary>
         /// 释放 Layer2，回退到下方的 Layer1 显示。
-        /// 只有在 Layer1 已就绪时才清除 Layer2，否则保留 Layer2 继续兜底，
-        /// 避免出现空白帧或缩略图闪烁。
+        /// Fix: 简化判断——只要 Layer1 已就绪（字段或缓存任一）就清除 Layer2；
+        ///      两个条件本质相同（_l1Front 非空即已就绪），合并为一个检查。
         /// </summary>
         public void EvictLayer2(Dictionary<uint, BitmapImage> layer1Cache)
         {
             if (_l2Front == null) return;
-            // 只有 Layer1 已就绪时才清 Layer2，让下方 Layer1 自然显示
-            if (_l1Front != null || layer1Cache.ContainsKey(PageIndex))
-                ClearLayerImmediate(ref _l2Back, ref _l2Front, nameof(Layer2Back), nameof(Layer2Front));
+            // HasLayer1 已覆盖 _l1Front != null；缓存命中说明下次 SetLayer1 会立即补上
+            if (HasLayer1 || layer1Cache.ContainsKey(PageIndex))
+                ClearLayerImmediate();
             // 否则保留 Layer2 继续兜底，等 Layer1 渲染完或新 Layer2 到来再替换
         }
 
@@ -782,16 +877,18 @@ namespace FluentPDF.Pages
 
             if (back != null)
             {
+                // Fix: 使用 Window.Current.Dispatcher 而非 CoreApplication.MainView，
+                //      避免多窗口场景下拿到错误窗口的 Dispatcher。
                 var backRef = backName;
-                _ = Windows.ApplicationModel.Core.CoreApplication.MainView.CoreWindow.Dispatcher
+                _ = Windows.UI.Core.CoreWindow.GetForCurrentThread()?.Dispatcher
                     .RunAsync(Windows.UI.Core.CoreDispatcherPriority.Low, () =>
                     {
-                        ClearBackByName(backRef);
+                        ClearFieldByName(backRef);
                     });
             }
         }
 
-        private void ClearBackByName(string name)
+        private void ClearFieldByName(string name)
         {
             switch (name)
             {
@@ -802,20 +899,16 @@ namespace FluentPDF.Pages
             }
         }
 
-        private void ClearLayerImmediate(
-            ref BitmapImage? back, ref BitmapImage? front,
-            string backName, string frontName)
+        /// <summary>
+        /// 清除 Layer2 双缓冲，通过属性 setter 触发 PropertyChanged 通知 UI。
+        /// </summary>
+        private void ClearLayerImmediate()
         {
-            // 延迟一帧清除，避免 GPU 提交当前帧前图像已被置空
-            var bn = backName; var fn = frontName;
-            _ = Windows.ApplicationModel.Core.CoreApplication.MainView.CoreWindow.Dispatcher
-                .RunAsync(Windows.UI.Core.CoreDispatcherPriority.Low, () =>
-                {
-                    ClearBackByName(bn);
-                    ClearBackByName(fn); // 复用 ClearBackByName 处理 Front
-                });
-            back  = null;
-            front = null;
+            _fadeTimer?.Stop();
+            _fadeTimer    = null;
+            Layer2Opacity = 1.0;   // 下次 SetLayer2 时会重置为 0，这里恢复默认
+            Layer2Front   = null;
+            Layer2Back    = null;
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;

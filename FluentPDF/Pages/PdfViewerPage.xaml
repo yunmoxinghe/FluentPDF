@@ -196,7 +196,8 @@
                                 <Image Source="{x:Bind Layer1Back,  Mode=OneWay}" Stretch="Fill"/>
                                 <Image Source="{x:Bind Layer1Front, Mode=OneWay}" Stretch="Fill"/>
                                 <Image Source="{x:Bind Layer2Back,  Mode=OneWay}" Stretch="Fill"/>
-                                <Image Source="{x:Bind Layer2Front, Mode=OneWay}" Stretch="Fill"/>
+                                <Image Source="{x:Bind Layer2Front, Mode=OneWay}" Stretch="Fill"
+                                       Opacity="{x:Bind Layer2Opacity, Mode=OneWay}"/>
                             </Grid>
                         </DataTemplate>
                     </muxc:ItemsRepeater.ItemTemplate>
