@@ -1,8 +1,17 @@
 ﻿<Application
     x:Class="FluentPDF.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:muxc="using:Microsoft.UI.Xaml.Controls">
     <Application.Resources>
-        <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- 让 TabView 内容区背景透明，透出 Mica/Acrylic 材质 -->
+            <!-- TabContentPresenter 用的是 TabViewItemHeaderBackgroundSelected 作为背景 -->
+            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="Transparent"/>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>
