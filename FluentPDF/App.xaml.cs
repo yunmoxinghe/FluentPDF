@@ -296,6 +296,11 @@ namespace FluentPDF
             get => _settings.AllowCloseWelcomeWhenFileOpen;
             set { _settings.AllowCloseWelcomeWhenFileOpen = value; SaveSettings(); }
         }
+        public bool SchoolMode
+        {
+            get => _settings.SchoolMode;
+            set { _settings.SchoolMode = value; SaveSettings(); }
+        }
 
         private void SaveSettings()
         {
@@ -333,5 +338,7 @@ namespace FluentPDF
         public bool ShowWelcomeOnLaunch { get; set; } = true;
         /// <summary>打开其他文件后是否允许关闭欢迎标签</summary>
         public bool AllowCloseWelcomeWhenFileOpen { get; set; } = true;
+        /// <summary>学校模式：将工具栏移至底部</summary>
+        public bool SchoolMode { get; set; } = false;
     }
 }

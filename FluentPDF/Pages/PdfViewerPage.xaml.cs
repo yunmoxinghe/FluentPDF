@@ -152,6 +152,29 @@ namespace FluentPDF.Pages
             ScheduleLayer2();
         }
 
+        /// <summary>应用学校模式：将工具栏移至底部或恢复顶部。</summary>
+        public void ApplySchoolMode(bool enabled)
+        {
+            if (enabled)
+            {
+                // 工具栏移到 Row=2，分割线改为顶部对齐
+                Grid.SetRow(Toolbar, 2);
+                Grid.SetRow(ToolbarDivider, 2);
+                ToolbarDivider.VerticalAlignment = Windows.UI.Xaml.VerticalAlignment.Top;
+                TopToolbarRow.Height    = new GridLength(0);
+                BottomToolbarRow.Height = GridLength.Auto;
+            }
+            else
+            {
+                // 工具栏恢复 Row=0，分割线恢复底部对齐
+                Grid.SetRow(Toolbar, 0);
+                Grid.SetRow(ToolbarDivider, 0);
+                ToolbarDivider.VerticalAlignment = Windows.UI.Xaml.VerticalAlignment.Bottom;
+                TopToolbarRow.Height    = GridLength.Auto;
+                BottomToolbarRow.Height = new GridLength(0);
+            }
+        }
+
         public void LoadFile(StorageFile file)
         {
             _pendingFile = file;
@@ -228,6 +251,7 @@ namespace FluentPDF.Pages
                 Toolbar.Visibility         = Visibility.Visible;
                 PdfScrollViewer.MaxZoomFactor = (float)_profile.MaxZoom;
                 LowEndToggle.IsChecked     = IsLowEndMode;
+                ApplySchoolMode(SettingsManager.Instance.SchoolMode);
                 PdfScrollViewer.ChangeView(null, null, initialZoom, disableAnimation: true);
 
                 // 等布局走完一帧再渲染，此时 ViewportHeight 已就绪，GetVisibleRange 能拿到正确范围
@@ -809,12 +833,21 @@ namespace FluentPDF.Pages
         public bool HasLayer1     => _l1Front != null;
         public bool IsLayer2Ready => _l2Front != null;
 
-        public void SetLayer1(BitmapImage bmp) => SwapLayer(bmp, ref _l1Back, ref _l1Front,
-            nameof(Layer1Back), nameof(Layer1Front));
+        public void SetLayer1(BitmapImage bmp)
+        {
+            // Layer1 不需要淡入，直接替换；旧图不保留（Layer1 只作兜底，不需要双缓冲）
+            Layer1Back  = null;
+            Layer1Front = bmp;
+        }
 
         public void SetLayer2(BitmapImage bmp)
         {
-            SwapLayer(bmp, ref _l2Back, ref _l2Front, nameof(Layer2Back), nameof(Layer2Front));
+            // 把当前 front 移到 back 作为淡入期间的兜底，再写入新图
+            if (_l2Front != null)
+            {
+                Layer2Back = _l2Front;
+            }
+            Layer2Front = bmp;
             StartFadeIn();
         }
 
@@ -838,8 +871,9 @@ namespace FluentPDF.Pages
             if (_fadeElapsedMs >= FadeDurationMs)
             {
                 _fadeTimer!.Stop();
-                _fadeTimer = null;
+                _fadeTimer    = null;
                 Layer2Opacity = 1.0;
+                Layer2Back    = null;   // 淡入完成，旧图不再需要，释放内存
                 return;
             }
 
@@ -861,42 +895,6 @@ namespace FluentPDF.Pages
             if (HasLayer1 || layer1Cache.ContainsKey(PageIndex))
                 ClearLayerImmediate();
             // 否则保留 Layer2 继续兜底，等 Layer1 渲染完或新 Layer2 到来再替换
-        }
-
-        private void SwapLayer(BitmapImage bmp,
-            ref BitmapImage? back, ref BitmapImage? front,
-            string backName, string frontName)
-        {
-            if (front != null)
-            {
-                back = front;
-                Notify(backName);
-            }
-            front = bmp;
-            Notify(frontName);
-
-            if (back != null)
-            {
-                // Fix: 使用 Window.Current.Dispatcher 而非 CoreApplication.MainView，
-                //      避免多窗口场景下拿到错误窗口的 Dispatcher。
-                var backRef = backName;
-                _ = Windows.UI.Core.CoreWindow.GetForCurrentThread()?.Dispatcher
-                    .RunAsync(Windows.UI.Core.CoreDispatcherPriority.Low, () =>
-                    {
-                        ClearFieldByName(backRef);
-                    });
-            }
-        }
-
-        private void ClearFieldByName(string name)
-        {
-            switch (name)
-            {
-                case nameof(Layer1Back):  Layer1Back  = null; break;
-                case nameof(Layer1Front): Layer1Front = null; break;
-                case nameof(Layer2Back):  Layer2Back  = null; break;
-                case nameof(Layer2Front): Layer2Front = null; break;
-            }
         }
 
         /// <summary>

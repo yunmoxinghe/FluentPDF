@@ -82,6 +82,9 @@
   <data name="Settings_ShowWelcomeCard.Description" xml:space="preserve"><value>直接启动应用时显示欢迎标签（通过文件打开时始终不显示）</value></data>
   <data name="Settings_AllowCloseWelcomeCard.Header" xml:space="preserve"><value>打开文件后允许关闭欢迎页</value></data>
   <data name="Settings_AllowCloseWelcomeCard.Description" xml:space="preserve"><value>打开其他文件后，欢迎标签将变为可关闭</value></data>
+  <data name="SchoolModeGroup.Text" xml:space="preserve"><value>学校模式</value></data>
+  <data name="Settings_SchoolModeCard.Header" xml:space="preserve"><value>学校模式</value></data>
+  <data name="Settings_SchoolModeCard.Description" xml:space="preserve"><value>将工具栏移至页面底部</value></data>
   <data name="AboutGroup.Text" xml:space="preserve"><value>关于</value></data>
   <data name="GithubLink.Text" xml:space="preserve"><value>GitHub 仓库</value></data>
   <data name="TemplateLink.Text" xml:space="preserve"><value>应用模板</value></data>

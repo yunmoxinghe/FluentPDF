@@ -125,11 +125,12 @@
 
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition x:Name="TopToolbarRow"    Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition x:Name="BottomToolbarRow" Height="0"/>
         </Grid.RowDefinitions>
 
-        <!-- 工具栏 -->
+        <!-- 工具栏（学校模式下移至 Row=2） -->
         <CommandBar Grid.Row="0"
                     x:Name="Toolbar"
                     Visibility="Collapsed"
@@ -153,8 +154,9 @@
             </AppBarToggleButton>
         </CommandBar>
 
-        <!-- 工具栏底部分割线 -->
-        <Border Grid.Row="0"
+        <!-- 工具栏分割线（顶部时在底部，底部时在顶部） -->
+        <Border x:Name="ToolbarDivider"
+                Grid.Row="0"
                 VerticalAlignment="Bottom"
                 Height="1"
                 Visibility="{Binding Visibility, ElementName=Toolbar}"

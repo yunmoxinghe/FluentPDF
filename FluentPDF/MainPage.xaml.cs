@@ -332,6 +332,14 @@ namespace FluentPDF
             ElementSoundPlayer.State = SettingsManager.Instance.EnableSound
                 ? ElementSoundPlayerState.On
                 : ElementSoundPlayerState.Off;
+
+            // 将学校模式应用到所有已打开的 PDF 标签页
+            bool schoolMode = SettingsManager.Instance.SchoolMode;
+            foreach (var item in PdfTabView.TabItems)
+            {
+                if (item is TabViewItem tab && tab.Content is Pages.PdfViewerPage viewer)
+                    viewer.ApplySchoolMode(schoolMode);
+            }
         }
 
         private static string GetString(string key)

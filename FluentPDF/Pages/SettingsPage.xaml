@@ -87,6 +87,15 @@
                     <ToggleSwitch x:Name="AllowCloseWelcomeToggle" Toggled="AllowCloseWelcomeToggle_Toggled"/>
                 </controls:SettingsCard>
 
+                <!-- 学校模式 -->
+                <TextBlock x:Uid="SchoolModeGroup"
+                           Style="{StaticResource SettingsSectionHeaderTextBlockStyle}"/>
+
+                <controls:SettingsCard x:Uid="Settings_SchoolModeCard"
+                                       HeaderIcon="{ui:FontIcon Glyph=&#xE7BE;}">
+                    <ToggleSwitch x:Name="SchoolModeToggle" Toggled="SchoolModeToggle_Toggled"/>
+                </controls:SettingsCard>
+
                 <!-- 关于 -->
                 <TextBlock x:Uid="AboutGroup"
                            Style="{StaticResource SettingsSectionHeaderTextBlockStyle}"/>

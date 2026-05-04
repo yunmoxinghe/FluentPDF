@@ -44,6 +44,7 @@ namespace FluentPDF.Pages
             SoundToggle.IsOn = s.EnableSound;
             ShowWelcomeToggle.IsOn = s.ShowWelcomeOnLaunch;
             AllowCloseWelcomeToggle.IsOn = s.AllowCloseWelcomeWhenFileOpen;
+            SchoolModeToggle.IsOn = s.SchoolMode;
         }
 
         private void LoadAppInfo()
@@ -103,6 +104,13 @@ private void SoundToggle_Toggled(object sender, RoutedEventArgs e)
         {
             if (_isInitializing) return;
             SettingsManager.Instance.AllowCloseWelcomeWhenFileOpen = AllowCloseWelcomeToggle.IsOn;
+        }
+
+        private void SchoolModeToggle_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializing) return;
+            SettingsManager.Instance.SchoolMode = SchoolModeToggle.IsOn;
+            MainPage.Instance?.ApplySettings();
         }
     }
 }
