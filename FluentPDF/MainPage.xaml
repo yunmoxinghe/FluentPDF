@@ -6,9 +6,100 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
-    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    Background="Transparent">
 
     <Grid>
+        <Grid.Background>
+            <AcrylicBrush BackgroundSource="HostBackdrop"
+                          TintColor="{ThemeResource SystemChromeMediumColor}"
+                          TintOpacity="0.5"
+                          FallbackColor="{ThemeResource SystemChromeMediumLowColor}"/>
+        </Grid.Background>
+        <Grid.RowDefinitions>
+            <!-- 标题栏占位行，高度在代码里动态调整 -->
+            <RowDefinition x:Name="TitleBarRow" Height="32"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
 
+        <!-- 自定义标题栏：透明可拖动区域 + 应用名 -->
+        <Grid x:Name="TitleBarArea" Grid.Row="0" Background="Transparent">
+            <TextBlock Text="FluentPDF"
+                       VerticalAlignment="Center"
+                       Margin="12,0,0,0"
+                       Style="{ThemeResource CaptionTextBlockStyle}"
+                       Foreground="{ThemeResource SystemControlForegroundBaseHighBrush}"/>
+        </Grid>
+
+        <!-- 顶部命令栏 -->
+        <CommandBar Grid.Row="1" DefaultLabelPosition="Right"
+                    Background="Transparent">
+            <AppBarButton x:Name="OpenButton" Icon="OpenFile" Label="打开 PDF" Click="OpenButton_Click"/>
+            <AppBarSeparator/>
+            <AppBarButton x:Name="ZoomOutButton" Icon="ZoomOut" Label="缩小" Click="ZoomOutButton_Click"/>
+            <AppBarButton x:Name="ZoomInButton"  Icon="ZoomIn"  Label="放大" Click="ZoomInButton_Click"/>
+            <AppBarButton x:Name="ZoomFitButton" Icon="BackToWindow" Label="适合宽度" Click="ZoomFitButton_Click"/>
+        </CommandBar>
+
+        <!-- 墨迹工具栏 -->
+        <InkToolbar x:Name="Toolbar" Grid.Row="2"
+                    Visibility="Collapsed"
+                    HorizontalAlignment="Left"/>
+
+        <!-- 占位提示 -->
+        <StackPanel x:Name="PlaceholderPanel" Grid.Row="3"
+                    HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="16">
+            <FontIcon Glyph="&#xEA90;" FontSize="64"
+                      Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}"/>
+            <TextBlock Text="打开一个 PDF 文件以开始阅读"
+                       Style="{ThemeResource SubtitleTextBlockStyle}"
+                       Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}"
+                       HorizontalAlignment="Center"/>
+            <Button Content="选择文件" HorizontalAlignment="Center"
+                    Style="{ThemeResource AccentButtonStyle}"
+                    Click="OpenButton_Click"/>
+        </StackPanel>
+
+        <!-- 加载进度环 -->
+        <ProgressRing x:Name="LoadingRing" Grid.Row="3"
+                      IsActive="False" Width="48" Height="48"
+                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+        <ScrollViewer x:Name="PdfScrollViewer" Grid.Row="3"
+                      Visibility="Collapsed"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Auto"
+                      ZoomMode="Enabled"
+                      MinZoomFactor="0.25"
+                      MaxZoomFactor="4.0">
+            <Grid x:Name="PagesHost">
+                <ItemsControl x:Name="PagesControl" HorizontalAlignment="Center">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Vertical"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="local:PdfPageItem">
+                            <Grid Margin="8,8,8,8"
+                                  Width="{x:Bind RenderedWidth, Mode=OneWay}"
+                                  Height="{x:Bind RenderedHeight, Mode=OneWay}"
+                                  Background="{ThemeResource SystemControlBackgroundBaseLowBrush}">
+                                <ProgressRing IsActive="{x:Bind IsFirstLoad, Mode=OneWay}"
+                                              Width="32" Height="32"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                                <Image Source="{x:Bind PageImage, Mode=OneWay}"
+                                       Stretch="Fill"/>
+                                <InkCanvas x:Name="PageInkCanvas"
+                                           Width="{x:Bind RenderedWidth, Mode=OneWay}"
+                                           Height="{x:Bind RenderedHeight, Mode=OneWay}"/>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Grid>
+        </ScrollViewer>
     </Grid>
 </Page>

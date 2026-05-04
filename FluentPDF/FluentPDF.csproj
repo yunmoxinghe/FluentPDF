@@ -12,5 +12,7 @@
     <PublishProfile>win-$(Platform).pubxml</PublishProfile>
     <DisableRuntimeMarshalling>true</DisableRuntimeMarshalling>
     <EnableMsixTooling>true</EnableMsixTooling>
+    <!-- 实现 WinRT 接口（IUriToStreamResolver）需要 CsWinRT 生成 AOT 兼容的 unsafe vtable -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 </Project>
