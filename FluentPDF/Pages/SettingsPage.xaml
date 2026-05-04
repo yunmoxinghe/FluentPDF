@@ -108,7 +108,7 @@
                                                ContentAlignment="Left">
                             <StackPanel Margin="-12,0,0,0" Orientation="Vertical">
                                 <HyperlinkButton Click="OpenExternalLink"
-                                                 Tag="https://github.com/Furry-Xiyi/UWP-Blank-Template">
+                                                 Tag="https://github.com/yunmoxinghe/FluentPDF">
                                     <TextBlock x:Uid="GithubLink"/>
                                 </HyperlinkButton>
                             </StackPanel>
