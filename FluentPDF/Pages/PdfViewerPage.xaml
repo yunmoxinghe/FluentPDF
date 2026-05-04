@@ -141,6 +141,13 @@
             <AppBarButton x:Name="ZoomFitButton" Icon="BackToWindow" x:Uid="ZoomFit" Click="ZoomFitButton_Click"/>
         </CommandBar>
 
+        <!-- 工具栏底部分割线 -->
+        <Border Grid.Row="0"
+                VerticalAlignment="Bottom"
+                Height="1"
+                Visibility="{Binding Visibility, ElementName=Toolbar}"
+                Background="{ThemeResource SystemControlForegroundBaseLowBrush}"/>
+
         <!-- 加载进度环 -->
         <ProgressRing x:Name="LoadingRing" Grid.Row="1"
                       IsActive="False" Width="48" Height="48"

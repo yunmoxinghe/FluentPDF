@@ -23,7 +23,7 @@ namespace FluentPDF.Pages
         private CancellationTokenSource? _layer2Cts;   // 高分辨率（可见区）
         private CancellationTokenSource? _layer1Cts;   // 单页缩略图（后台）
         private DispatcherTimer?         _debounceTimer;
-        private const int DebounceMs = 150;
+        private const int DebounceMs = 80;
 
         // ── 缓存 ──────────────────────────────────────────────────
         // Layer2 LRU 缓存：key=(pageIndex, zoomBucket)，最多 60 页
@@ -311,9 +311,11 @@ namespace FluentPDF.Pages
 
             if (needsLayer2)
             {
+                // 只取消 Layer1，让出渲染资源给即将到来的 Layer2
+                // 不在这里触发 ScheduleLayer2 —— 滚动过程中触发只会被下一帧立刻 cancel
+                // Layer2 由 debounce（滚动停止后）统一触发，避免无限 cancel 循环
                 _layer1Cts?.Cancel();
                 _layer1Cts = null;
-                ScheduleLayer2();
             }
         }
 
@@ -522,16 +524,17 @@ namespace FluentPDF.Pages
             nameof(Layer2Back), nameof(Layer2Front));
 
         /// <summary>
-        /// 释放 Layer2，降级回 Layer1。
-        /// 如果有 Layer1 缓存则用 Layer1 填充 Layer2 的位置（视觉上无缝）。
+        /// 释放 Layer2，回退到下方的 Layer1 显示。
+        /// 只有在 Layer1 已就绪时才清除 Layer2，否则保留 Layer2 继续兜底，
+        /// 避免出现空白帧或缩略图闪烁。
         /// </summary>
         public void EvictLayer2(Dictionary<uint, BitmapImage> layer1Cache)
         {
             if (_l2Front == null) return;
-            if (layer1Cache.TryGetValue(PageIndex, out var l1))
-                SwapLayer(l1, ref _l2Back, ref _l2Front, nameof(Layer2Back), nameof(Layer2Front));
-            else
+            // 只有 Layer1 已就绪时才清 Layer2，让下方 Layer1 自然显示
+            if (_l1Front != null || layer1Cache.ContainsKey(PageIndex))
                 ClearLayerImmediate(ref _l2Back, ref _l2Front, nameof(Layer2Back), nameof(Layer2Front));
+            // 否则保留 Layer2 继续兜底，等 Layer1 渲染完或新 Layer2 到来再替换
         }
 
         private void SwapLayer(BitmapImage bmp,
@@ -561,8 +564,10 @@ namespace FluentPDF.Pages
         {
             switch (name)
             {
-                case nameof(Layer1Back): Layer1Back = null; break;
-                case nameof(Layer2Back): Layer2Back = null; break;
+                case nameof(Layer1Back):  Layer1Back  = null; break;
+                case nameof(Layer1Front): Layer1Front = null; break;
+                case nameof(Layer2Back):  Layer2Back  = null; break;
+                case nameof(Layer2Front): Layer2Front = null; break;
             }
         }
 
@@ -570,8 +575,16 @@ namespace FluentPDF.Pages
             ref BitmapImage? back, ref BitmapImage? front,
             string backName, string frontName)
         {
-            back  = null; Notify(backName);
-            front = null; Notify(frontName);
+            // 延迟一帧清除，避免 GPU 提交当前帧前图像已被置空
+            var bn = backName; var fn = frontName;
+            _ = Windows.ApplicationModel.Core.CoreApplication.MainView.CoreWindow.Dispatcher
+                .RunAsync(Windows.UI.Core.CoreDispatcherPriority.Low, () =>
+                {
+                    ClearBackByName(bn);
+                    ClearBackByName(fn); // 复用 ClearBackByName 处理 Front
+                });
+            back  = null;
+            front = null;
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;
