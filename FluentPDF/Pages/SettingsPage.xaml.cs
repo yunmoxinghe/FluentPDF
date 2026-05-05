@@ -45,6 +45,7 @@ namespace FluentPDF.Pages
             ShowWelcomeToggle.IsOn = s.ShowWelcomeOnLaunch;
             AllowCloseWelcomeToggle.IsOn = s.AllowCloseWelcomeWhenFileOpen;
             SchoolModeToggle.IsOn = s.SchoolMode;
+            RbPdfEngine.SelectedIndex = s.PdfEngine == "PDFium" ? 1 : 0;
         }
 
         private void LoadAppInfo()
@@ -110,6 +111,13 @@ private void SoundToggle_Toggled(object sender, RoutedEventArgs e)
         {
             if (_isInitializing) return;
             SettingsManager.Instance.SchoolMode = SchoolModeToggle.IsOn;
+            MainPage.Instance?.ApplySettings();
+        }
+
+        private void RbPdfEngine_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_isInitializing) return;
+            SettingsManager.Instance.PdfEngine = RbPdfEngine.SelectedIndex == 1 ? "PDFium" : "Windows";
             MainPage.Instance?.ApplySettings();
         }
     }

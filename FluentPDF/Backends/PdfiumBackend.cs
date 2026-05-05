@@ -39,24 +39,26 @@ namespace FluentPDF.Backends
     /// <summary>
     /// 基于 PDFium（via PDFtoImage + SkiaSharp）的渲染后端。
     /// 支持密码保护 PDF，win-x64 和 win-arm64 均有原生二进制。
+    ///
+    /// 注意：PDFtoImage 每次渲染都会重新解析 PDF（内部无文档缓存），
+    /// 并发渲染会导致内存暴涨。用 SemaphoreSlim(1,1) 强制串行，
+    /// 牺牲并发换稳定性。后续可换用能持有文档状态的绑定库优化。
     /// </summary>
     public sealed class PdfiumBackend : IPdfBackend
     {
-        // 文档字节缓存：PDFtoImage 每次渲染都从 Stream 读取，
-        // 用 MemoryStream 避免重复读取 StorageFile。
         private byte[]? _docBytes;
         private string? _password;
         private uint    _pageCount;
-
-        // 页面尺寸缓存（pt 单位，与 Windows.Data.Pdf 一致）
-        // PDFtoImage 的 GetPageSize 也需要打开文档，缓存避免重复 I/O。
         private (double Width, double Height)[]? _pageSizes;
+
+        // PDFtoImage 每次渲染都重新解析 PDF，强制串行避免并发解析导致 OOM
+        private readonly SemaphoreSlim _renderSem = new(1, 1);
 
         // ── IPdfBackend ───────────────────────────────────────────
 
         public uint   PageCount        => _pageCount;
         public bool   SupportsPassword => true;
-        public string BackendName      => "PDFium (PDFtoImage)";
+        public string BackendName      => "PDFium";
 
         public (double Width, double Height) GetPageSize(uint pageIndex)
         {
@@ -87,14 +89,14 @@ namespace FluentPDF.Backends
             }
 
             // 在 ThreadPool 线程获取页数和页面尺寸（PDFium 调用会阻塞）
+            // 不传 ct 给 Task.Run，避免任务启动前取消时抛出未捕获的 TaskCanceledException
             await Task.Run(() =>
             {
-                ct.ThrowIfCancellationRequested();
+                if (ct.IsCancellationRequested) return;
                 try
                 {
                     using var stream = new MemoryStream(_docBytes);
 
-                    // GetPageCount / GetPageSizes 是 PDFtoImage 提供的静态辅助方法
                     int count = Conversion.GetPageCount(stream, leaveOpen: true, password: _password);
                     _pageCount = (uint)count;
 
@@ -103,7 +105,6 @@ namespace FluentPDF.Backends
 
                     _pageSizes = new (double, double)[count];
                     for (int i = 0; i < count; i++)
-                        // PDFtoImage 返回 SizeF（单位 pt），直接对应 Windows.Data.Pdf 的 Size
                         _pageSizes[i] = (sizes[i].Width, sizes[i].Height);
                 }
                 catch (Exception ex) when (
@@ -116,81 +117,85 @@ namespace FluentPDF.Backends
                 {
                     throw new InvalidOperationException($"无法解析 PDF 文件：{ex.Message}");
                 }
-            }, ct);
+            });
         }
 
         public async Task<BitmapImage?> RenderPageAsync(
             uint pageIndex, uint targetWidth, uint targetHeight, CancellationToken ct)
         {
             if (_docBytes == null) return null;
+            if (ct.IsCancellationRequested) return null;
 
-            // 渲染在 ThreadPool 线程执行，输出 PNG 字节
-            byte[]? pngBytes = null;
+            // 串行化渲染：PDFtoImage 每次调用都重新解析 PDF，并发会 OOM
+            await _renderSem.WaitAsync(ct).ConfigureAwait(false);
+            // WaitAsync 本身不会因 ct 取消而抛出未捕获异常（它返回 cancelled task），
+            // 但 await 会把 OperationCanceledException 传播出来，
+            // 由 PdfViewerPage 的 catch 处理，这里不需要额外 try。
             try
             {
-                pngBytes = await Task.Run(() =>
+                byte[]? pngBytes = null;
+                try
                 {
-                    ct.ThrowIfCancellationRequested();
+                    pngBytes = await Task.Run(() =>
+                    {
+                        if (ct.IsCancellationRequested) return null;
 
-                    using var stream = new MemoryStream(_docBytes);
+                        using var stream = new MemoryStream(_docBytes);
+                        using SKBitmap skBitmap = Conversion.ToImage(
+                            stream,
+                            (Index)(int)pageIndex,
+                            leaveOpen: true,
+                            _password,
+                            new RenderOptions(
+                                Dpi:              72,
+                                Width:            (int)targetWidth,
+                                Height:           (int)targetHeight,
+                                WithAnnotations:  false,
+                                WithFormFill:     false,
+                                WithAspectRatio:  false,
+                                Rotation:         PdfRotation.Rotate0,
+                                AntiAliasing:     PdfAntiAliasing.All,
+                                BackgroundColor:  SKColors.White,
+                                Bounds:           null,
+                                UseTiling:        false,
+                                DpiRelativeToBounds: false,
+                                Grayscale:        false
+                            )
+                        );
 
-                    // ToImage(Stream, Index, bool leaveOpen, string? password, RenderOptions)
-                    // RenderOptions(int dpi, int? width, int? height, bool withAnnotations,
-                    //   bool withFormFill, bool withAspectRatio, PdfRotation, PdfAntiAliasing,
-                    //   SKColor? background, RectangleF? bounds, bool useTiling,
-                    //   bool dpiRelativeToBounds, bool grayscale)
-                    // WithAspectRatio=false: honour both width and height exactly as passed.
-                    using SKBitmap skBitmap = Conversion.ToImage(
-                        stream,
-                        (Index)(int)pageIndex,
-                        leaveOpen: true,
-                        _password,
-                        new RenderOptions(
-                            Dpi:              72,               // ignored when Width+Height are set
-                            Width:            (int)targetWidth,
-                            Height:           (int)targetHeight,
-                            WithAnnotations:  false,
-                            WithFormFill:     false,
-                            WithAspectRatio:  false,            // exact pixel dimensions
-                            Rotation:         PdfRotation.Rotate0,
-                            AntiAliasing:     PdfAntiAliasing.All,
-                            BackgroundColor:  SKColors.White,
-                            Bounds:           null,
-                            UseTiling:        false,
-                            DpiRelativeToBounds: false,
-                            Grayscale:        false
-                        )
-                    );
+                        if (ct.IsCancellationRequested) return null;
 
-                    ct.ThrowIfCancellationRequested();
+                        using var ms = new MemoryStream();
+                        skBitmap.Encode(ms, SKEncodedImageFormat.Png, quality: 100);
+                        return ms.ToArray();
+                    });
+                }
+                catch (OperationCanceledException) { return null; }
+                catch { return null; }
 
-                    // 编码为 PNG，供 BitmapImage 解码
-                    using var ms = new MemoryStream();
-                    skBitmap.Encode(ms, SKEncodedImageFormat.Png, quality: 100);
-                    return ms.ToArray();
-                }, ct);
+                if (pngBytes == null || ct.IsCancellationRequested) return null;
+
+                try
+                {
+                    using var ras = new InMemoryRandomAccessStream();
+                    using var writer = new DataWriter(ras);
+                    writer.WriteBytes(pngBytes);
+                    await writer.StoreAsync();
+                    await writer.FlushAsync();
+                    if (ct.IsCancellationRequested) return null;
+                    ras.Seek(0);
+
+                    var bitmap = new BitmapImage();
+                    await bitmap.SetSourceAsync(ras);
+                    return ct.IsCancellationRequested ? null : bitmap;
+                }
+                catch (OperationCanceledException) { return null; }
+                catch { return null; }
             }
-            catch (OperationCanceledException) { return null; }
-            catch { return null; }
-
-            if (pngBytes == null || ct.IsCancellationRequested) return null;
-
-            // BitmapImage 必须在 UI 线程创建
-            try
+            finally
             {
-                using var ras = new InMemoryRandomAccessStream();
-                using var writer = new DataWriter(ras);
-                writer.WriteBytes(pngBytes);
-                await writer.StoreAsync().AsTask(ct);
-                await writer.FlushAsync().AsTask(ct);
-                ras.Seek(0);
-
-                var bitmap = new BitmapImage();
-                await bitmap.SetSourceAsync(ras).AsTask(ct);
-                return ct.IsCancellationRequested ? null : bitmap;
+                _renderSem.Release();
             }
-            catch (OperationCanceledException) { return null; }
-            catch { return null; }
         }
 
         // ── IDisposable ───────────────────────────────────────────
@@ -199,6 +204,7 @@ namespace FluentPDF.Backends
         {
             _docBytes  = null;
             _pageSizes = null;
+            _renderSem.Dispose();
         }
     }
 }

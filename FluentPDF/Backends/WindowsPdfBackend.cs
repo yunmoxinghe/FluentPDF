@@ -25,8 +25,8 @@ namespace FluentPDF.Backends
 
         public uint PageCount => _doc?.PageCount ?? 0;
 
-        public bool SupportsPassword => false;   // Windows.Data.Pdf 的密码 API 存在但不稳定，暂标为不支持
-        public string BackendName    => "Windows.Data.Pdf";
+        public bool SupportsPassword => false;
+        public string BackendName    => "Windows";
 
         public (double Width, double Height) GetPageSize(uint pageIndex)
         {

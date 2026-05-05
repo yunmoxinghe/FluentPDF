@@ -58,7 +58,10 @@ namespace FluentPDF.Pages
     {
         private readonly ObservableCollection<PdfPageItem> _pages = new();
         // 渲染后端：默认使用 Windows.Data.Pdf，切换引擎只需换这一行
-        private IPdfBackend _backend = new PdfiumBackend();
+        private IPdfBackend _backend = new WindowsPdfBackend();
+
+        /// <summary>当前后端名称，供外部判断是否需要切换，避免重复加载。</summary>
+        public string CurrentBackendName => _backend.BackendName;
 
         // ── 渲染档位 ──────────────────────────────────────────────
         private RenderProfile _profile = RenderProfile.Normal;
@@ -102,6 +105,7 @@ namespace FluentPDF.Pages
         private int _lastEvictTo   = -1;
 
         private StorageFile? _pendingFile;
+        private StorageFile? _lastFile;   // 记录最后一次成功加载的文件，切换后端时重新加载用
 
         public PdfViewerPage()
         {
@@ -136,6 +140,21 @@ namespace FluentPDF.Pages
             if (PdfScrollViewer.ZoomFactor > (float)profile.MaxZoom)
                 PdfScrollViewer.ChangeView(null, null, (float)profile.MaxZoom, disableAnimation: true);
             ScheduleLayer2();
+        }
+
+        /// <summary>
+        /// 切换渲染后端。切换后清空缓存并用新后端重新加载当前文件。
+        /// 如果当前没有打开文件则只替换后端。
+        /// </summary>
+        public void SetBackend(IPdfBackend newBackend)
+        {
+            var old = _backend;
+            _backend = newBackend;
+            old.Dispose();
+
+            // 有文件时用新后端重新加载
+            if (_lastFile != null)
+                LoadFile(_lastFile);
         }
 
         /// <summary>应用学校模式：将工具栏移至底部或恢复顶部。</summary>
@@ -200,7 +219,6 @@ namespace FluentPDF.Pages
             try
             {
                 await _backend.LoadAsync(file);
-
                 uint pageCount = _backend.PageCount;
 
                 // ── 自动档位检测：页数 > 100 或首页超大，自动进入弱鸡模式 ──
@@ -224,6 +242,7 @@ namespace FluentPDF.Pages
                 });
 
                 LoadingRing.IsActive       = false;
+                _lastFile                  = file;   // 记录成功加载的文件，切换后端时重新加载用
                 PdfScrollViewer.Visibility = Visibility.Visible;
                 Toolbar.Visibility         = Visibility.Visible;
                 PdfScrollViewer.MaxZoomFactor = (float)_profile.MaxZoom;

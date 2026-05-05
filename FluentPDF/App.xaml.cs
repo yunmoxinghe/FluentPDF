@@ -301,6 +301,11 @@ namespace FluentPDF
             get => _settings.SchoolMode;
             set { _settings.SchoolMode = value; SaveSettings(); }
         }
+        public string PdfEngine
+        {
+            get => _settings.PdfEngine;
+            set { _settings.PdfEngine = value; SaveSettings(); }
+        }
 
         private void SaveSettings()
         {
@@ -340,5 +345,7 @@ namespace FluentPDF
         public bool AllowCloseWelcomeWhenFileOpen { get; set; } = true;
         /// <summary>学校模式：将工具栏移至底部</summary>
         public bool SchoolMode { get; set; } = false;
+        /// <summary>PDF 渲染引擎：Windows（系统内置）或 PDFium</summary>
+        public string PdfEngine { get; set; } = "Windows";
     }
 }

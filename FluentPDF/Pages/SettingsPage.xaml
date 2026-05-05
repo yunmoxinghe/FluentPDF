@@ -96,6 +96,25 @@
                     <ToggleSwitch x:Name="SchoolModeToggle" Toggled="SchoolModeToggle_Toggled"/>
                 </controls:SettingsCard>
 
+    <!-- 渲染引擎 -->
+                <TextBlock Text="渲染引擎"
+                           Style="{StaticResource SettingsSectionHeaderTextBlockStyle}"/>
+
+                <controls:SettingsExpander HeaderIcon="{ui:FontIcon Glyph=&#xE9F5;}"
+                                           Header="PDF 渲染引擎"
+                                           Description="PDFium 后端仍在开发中，暂不可用"
+                                           IsExpanded="False"
+                                           IsEnabled="False">
+                    <controls:SettingsExpander.Items>
+                        <controls:SettingsCard ContentAlignment="Left">
+                            <muxc:RadioButtons x:Name="RbPdfEngine" SelectionChanged="RbPdfEngine_SelectionChanged">
+                                <RadioButton Content="Windows.Data.Pdf（系统内置，速度快）" Tag="Windows"/>
+                                <RadioButton Content="PDFium（支持密码保护）"               Tag="PDFium"/>
+                            </muxc:RadioButtons>
+                        </controls:SettingsCard>
+                    </controls:SettingsExpander.Items>
+                </controls:SettingsExpander>
+
                 <!-- 关于 -->
                 <TextBlock x:Uid="AboutGroup"
                            Style="{StaticResource SettingsSectionHeaderTextBlockStyle}"/>
