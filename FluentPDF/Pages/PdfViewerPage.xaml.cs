@@ -104,6 +104,9 @@ namespace FluentPDF.Pages
         private int _lastEvictFrom = -1;
         private int _lastEvictTo   = -1;
 
+        // ── 适合模式切换 ──────────────────────────────────────────
+        // false = 适合宽度（默认），true = 适合页面大小
+        private bool _fitPageMode = false;
         private StorageFile? _pendingFile;
         private StorageFile? _lastFile;   // 记录最后一次成功加载的文件，切换后端时重新加载用
 
@@ -223,6 +226,9 @@ namespace FluentPDF.Pages
 
                 // ── 自动档位检测：页数 > 100 或首页超大，自动进入弱鸡模式 ──
                 var (p0w, p0h) = _backend.GetPageSize(0);
+                // 取整到整数逻辑像素，避免 Image 控件在亚像素尺寸上触发双线性插值模糊
+                p0w = Math.Round(p0w);
+                p0h = Math.Round(p0h);
                 bool autoLowEnd = pageCount > 100 || p0w > 2000 || p0h > 2000;
                 _profile = autoLowEnd ? RenderProfile.LowEnd : RenderProfile.Normal;
                 _layer2Cache = new LruCache<(uint, int), BitmapImage>(_profile.CacheCapacity);
@@ -294,6 +300,9 @@ namespace FluentPDF.Pages
             {
                 if (token.IsCancellationRequested) return;
                 var (w, h) = _backend.GetPageSize(i);
+                // 取整，保证 Grid 尺寸是整数逻辑像素
+                w = Math.Round(w);
+                h = Math.Round(h);
                 batch.Add(new PdfPageItem
                 {
                     PageIndex     = i,
@@ -429,25 +438,58 @@ namespace FluentPDF.Pages
         private void ZoomFitButton_Click(object sender, RoutedEventArgs e)
         {
             if (_pages.Count == 0) return;
-            // 用 ViewportWidth 而非 ActualWidth，排除垂直滚动条占用的宽度
-            double vw = PdfScrollViewer.ViewportWidth > 0
-                ? PdfScrollViewer.ViewportWidth
-                : PdfScrollViewer.ActualWidth;
-            float fit = (float)Math.Clamp(
-                vw / _pages[0].DisplayWidth, ZoomMin, _profile.MaxZoom);
 
-            // 提前算出缩放后的水平居中偏移，与缩放合并为一次 ChangeView，避免"放大→瞬移"两段动画
-            double ratio   = fit / PdfScrollViewer.ZoomFactor;
-            double extentAfter = PdfScrollViewer.ExtentWidth * ratio;
-            double centerH = Math.Max(0, (extentAfter - PdfScrollViewer.ViewportWidth) / 2);
+            // 每次点击切换模式
+            _fitPageMode = !_fitPageMode;
 
-            // 垂直方向按缩放比例等比换算，保持视口中心对应的内容位置不变
-            // 不换算的话 offset 不变但内容缩放了，视口会飞到错误页
-            double centerV = (PdfScrollViewer.VerticalOffset + PdfScrollViewer.ViewportHeight / 2)
-                             * ratio - PdfScrollViewer.ViewportHeight / 2;
-            centerV = Math.Max(0, centerV);
+            if (_fitPageMode)
+            {
+                // ── 当前：适合页面大小，点击后将切换回适合宽度 ──
+                // 图标和文字显示"下次点击的效果"即适合宽度
+                ZoomFitIcon.Glyph       = "\uEAD6";
+                ZoomFitButton.Label     = "适合宽度";
 
-            PdfScrollViewer.ChangeView(centerH, centerV, fit, disableAnimation: false);
+                // 执行：适合页面大小（完整显示当前页）
+                var (firstVisible, _) = GetVisibleRange();
+                int targetPage = Math.Max(0, firstVisible);
+                var page = _pages[targetPage];
+
+                double vw = PdfScrollViewer.ViewportWidth  > 0 ? PdfScrollViewer.ViewportWidth  : PdfScrollViewer.ActualWidth;
+                double vh = PdfScrollViewer.ViewportHeight > 0 ? PdfScrollViewer.ViewportHeight : PdfScrollViewer.ActualHeight;
+
+                float fitW = (float)(vw / page.DisplayWidth);
+                float fitH = (float)(vh / page.DisplayHeight);
+                float fit  = (float)Math.Clamp(Math.Min(fitW, fitH), ZoomMin, _profile.MaxZoom);
+
+                double extentAfter = PdfScrollViewer.ExtentWidth * (fit / PdfScrollViewer.ZoomFactor);
+                double centerH     = Math.Max(0, (extentAfter - vw) / 2);
+                double pageTopV    = GetPageTops()[targetPage] * fit;
+
+                PdfScrollViewer.ChangeView(centerH, pageTopV, fit, disableAnimation: false);
+            }
+            else
+            {
+                // ── 当前：适合宽度，点击后将切换回适合页面大小 ──
+                // 图标和文字显示"下次点击的效果"即适合页面大小
+                ZoomFitIcon.Glyph       = "\uE9A6";
+                ZoomFitButton.Label     = "适合页面大小";
+
+                // 执行：适合宽度
+                double vw = PdfScrollViewer.ViewportWidth > 0
+                    ? PdfScrollViewer.ViewportWidth
+                    : PdfScrollViewer.ActualWidth;
+                float fit = (float)Math.Clamp(
+                    vw / _pages[0].DisplayWidth, ZoomMin, _profile.MaxZoom);
+
+                double ratio       = fit / PdfScrollViewer.ZoomFactor;
+                double extentAfter = PdfScrollViewer.ExtentWidth * ratio;
+                double centerH     = Math.Max(0, (extentAfter - PdfScrollViewer.ViewportWidth) / 2);
+                double centerV     = (PdfScrollViewer.VerticalOffset + PdfScrollViewer.ViewportHeight / 2)
+                                     * ratio - PdfScrollViewer.ViewportHeight / 2;
+                centerV = Math.Max(0, centerV);
+
+                PdfScrollViewer.ChangeView(centerH, centerV, fit, disableAnimation: false);
+            }
         }
 
         /// <summary>

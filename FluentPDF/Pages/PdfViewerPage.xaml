@@ -139,9 +139,9 @@
                     HorizontalAlignment="Left">
             <AppBarButton x:Name="ZoomOutButton" Icon="ZoomOut" x:Uid="ZoomOut" Click="ZoomOutButton_Click"/>
             <AppBarButton x:Name="ZoomInButton"  Icon="ZoomIn"  x:Uid="ZoomIn"  Click="ZoomInButton_Click"/>
-            <AppBarButton x:Name="ZoomFitButton" x:Uid="ZoomFit" Click="ZoomFitButton_Click">
+            <AppBarButton x:Name="ZoomFitButton" Label="适合页面大小" Click="ZoomFitButton_Click">
                 <AppBarButton.Icon>
-                    <FontIcon Glyph="&#xEAD6;"/>
+                    <FontIcon x:Name="ZoomFitIcon" Glyph="&#xEAD6;"/>
                 </AppBarButton.Icon>
             </AppBarButton>
             <AppBarSeparator/>
@@ -188,6 +188,7 @@
                         <DataTemplate x:DataType="local:PdfPageItem">
                             <Grid Width="{x:Bind DisplayWidth, Mode=OneWay}"
                                   Height="{x:Bind DisplayHeight, Mode=OneWay}"
+                                  UseLayoutRounding="True"
                                   Background="{ThemeResource SystemControlBackgroundBaseLowBrush}">
                                 <!--
                                     双层渲染架构（从下到上）：
@@ -195,10 +196,10 @@
                                     Layer2: 高分辨率图（按需渲染，可见区优先）
                                     双缓冲：每层都有 Back/Front 两个 Image，切换时无空白帧
                                 -->
-                                <Image Source="{x:Bind Layer1Back,  Mode=OneWay}" Stretch="Fill"/>
-                                <Image Source="{x:Bind Layer1Front, Mode=OneWay}" Stretch="Fill"/>
-                                <Image Source="{x:Bind Layer2Back,  Mode=OneWay}" Stretch="Fill"/>
-                                <Image Source="{x:Bind Layer2Front, Mode=OneWay}" Stretch="Fill"
+                                <Image Source="{x:Bind Layer1Back,  Mode=OneWay}" Stretch="Fill" UseLayoutRounding="True"/>
+                                <Image Source="{x:Bind Layer1Front, Mode=OneWay}" Stretch="Fill" UseLayoutRounding="True"/>
+                                <Image Source="{x:Bind Layer2Back,  Mode=OneWay}" Stretch="Fill" UseLayoutRounding="True"/>
+                                <Image Source="{x:Bind Layer2Front, Mode=OneWay}" Stretch="Fill" UseLayoutRounding="True"
                                        Opacity="{x:Bind Layer2Opacity, Mode=OneWay}"/>
                             </Grid>
                         </DataTemplate>
