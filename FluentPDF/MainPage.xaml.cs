@@ -55,41 +55,62 @@ namespace FluentPDF
 
         private void PdfTabView_Loaded(object sender, RoutedEventArgs e)
         {
-            // 找到 TabView 内部的 ListView，清空其 ItemContainerTransitions，
-            // 防止新增标签时所有已有标签重放动画（WinUI 已知 bug）。
-            var listView = FindDescendant<ListView>(PdfTabView);
-            if (listView != null)
-            {
-                listView.ItemContainerTransitions = new TransitionCollection();
-                // 监听容器生成事件，给新标签单独播动画
-                listView.ContainerContentChanging += TabListView_ContainerContentChanging;
-            }
+            // 订阅 TabItemsChanged，在新标签加入后播入场动画
+            PdfTabView.TabItemsChanged += PdfTabView_TabItemsChanged;
         }
 
-        private void TabListView_ContainerContentChanging(
-            ListViewBase sender,
-            ContainerContentChangingEventArgs args)
+        private void PdfTabView_TabItemsChanged(
+            Microsoft.UI.Xaml.Controls.TabView sender,
+            Windows.Foundation.Collections.IVectorChangedEventArgs args)
         {
-            // 只处理新增（非回收复用）且是我们标记的那个标签
-            if (!args.InRecycleQueue
-                && args.Item is TabViewItem tab
-                && tab == _pendingAnimationTab)
+            // 只处理新增操作
+            if (args.CollectionChange != Windows.Foundation.Collections.CollectionChange.ItemInserted)
+                return;
+
+            var insertedIndex = (int)args.Index;
+            if (sender.TabItems[insertedIndex] is not TabViewItem tab || tab != _pendingAnimationTab)
+                return;
+
+            _pendingAnimationTab = null;
+
+            // 此时容器可能还未生成，推到下一帧再取
+            _ = Dispatcher.RunAsync(CoreDispatcherPriority.Low, () =>
             {
-                _pendingAnimationTab = null;
+                var listView = FindDescendant<ListView>(PdfTabView);
+                if (listView?.ContainerFromItem(tab) is UIElement container)
+                    RunSlideInAnimation(container);
+            });
+        }
 
-                // 给容器临时加入场动画，触发后立即清空，避免影响后续操作
-                var container = args.ItemContainer;
-                container.Transitions = new TransitionCollection
-                {
-                    new EntranceThemeTransition { FromHorizontalOffset = 40, FromVerticalOffset = 0 }
-                };
+        private static void RunSlideInAnimation(UIElement container)
+        {
+            container.RenderTransform = new Windows.UI.Xaml.Media.TranslateTransform { X = 40 };
+            container.Opacity = 0;
 
-                // 下一帧清掉，防止关闭/重排时再次触发
-                _ = container.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Low, () =>
-                {
-                    container.Transitions = new TransitionCollection();
-                });
-            }
+            var sb = new Storyboard();
+
+            var slideAnim = new DoubleAnimation
+            {
+                From = 40, To = 0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(250)),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(slideAnim, container);
+            Storyboard.SetTargetProperty(slideAnim, "(UIElement.RenderTransform).(TranslateTransform.X)");
+
+            var fadeAnim = new DoubleAnimation
+            {
+                From = 0, To = 1,
+                Duration = new Duration(TimeSpan.FromMilliseconds(200)),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(fadeAnim, container);
+            Storyboard.SetTargetProperty(fadeAnim, "UIElement.Opacity");
+
+            sb.Children.Add(slideAnim);
+            sb.Children.Add(fadeAnim);
+            sb.Completed += (_, _) => container.RenderTransform = null;
+            sb.Begin();
         }
 
         /// <summary>在可视树中查找第一个指定类型的后代元素。</summary>
