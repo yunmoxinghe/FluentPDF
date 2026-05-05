@@ -1,3 +1,4 @@
+using FluentPDF.Backends;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -5,9 +6,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
-using Windows.Data.Pdf;
 using Windows.Storage;
-using Windows.Storage.Streams;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Media.Imaging;
@@ -54,39 +53,12 @@ namespace FluentPDF.Pages
         };
     }
 
-    // ── Stream 对象池 ─────────────────────────────────────────────
-    // 复用 InMemoryRandomAccessStream，避免每次渲染都分配/释放大块内存
-    internal sealed class StreamPool
-    {
-        private readonly Stack<InMemoryRandomAccessStream> _pool = new();
-        private readonly int _maxSize;
-
-        public StreamPool(int maxSize) => _maxSize = maxSize;
-
-        public InMemoryRandomAccessStream Rent()
-        {
-            if (_pool.Count > 0)
-            {
-                var s = _pool.Pop();
-                s.Seek(0);
-                s.Size = 0; // 清空内容，重置写入位置
-                return s;
-            }
-            return new InMemoryRandomAccessStream();
-        }
-
-        public void Return(InMemoryRandomAccessStream stream)
-        {
-            if (_pool.Count < _maxSize)
-                _pool.Push(stream);
-            else
-                stream.Dispose();
-        }
-    }
+    // ── Stream 对象池已移入 WindowsPdfBackend，Page 层不再需要 ──
     public sealed partial class PdfViewerPage : Page
     {
         private readonly ObservableCollection<PdfPageItem> _pages = new();
-        private PdfDocument? _doc;
+        // 渲染后端：默认使用 Windows.Data.Pdf，切换引擎只需换这一行
+        private IPdfBackend _backend = new PdfiumBackend();
 
         // ── 渲染档位 ──────────────────────────────────────────────
         private RenderProfile _profile = RenderProfile.Normal;
@@ -105,7 +77,6 @@ namespace FluentPDF.Pages
         // Layer2 LRU 缓存：容量由档位决定
         private LruCache<(uint, int), BitmapImage> _layer2Cache = new(RenderProfile.Normal.CacheCapacity);
         private readonly Dictionary<uint, BitmapImage> _layer1Cache = new();
-        private readonly StreamPool _streamPool = new(8);
 
         // ── 固定常量 ──────────────────────────────────────────────
         private const double ZoomStep   = 0.25;
@@ -225,23 +196,16 @@ namespace FluentPDF.Pages
             _layer2Cache.Clear();
             _layer1Cache.Clear();
             _pageTopCache = null;   // 清除页顶坐标缓存，防止旧数据被新文档复用
-            _doc = null;
 
             try
             {
-                PdfDocument doc;
-                try { doc = await PdfDocument.LoadFromFileAsync(file); }
-                catch (Exception ex) when (ex.HResult == unchecked((int)0x8007052b))
-                { throw new InvalidOperationException("该 PDF 文件已加密，暂不支持密码保护的文件。"); }
-                catch (Exception ex) when (ex.HResult == unchecked((int)0x80004005))
-                { throw new InvalidOperationException("文件不是有效的 PDF 文档。"); }
+                await _backend.LoadAsync(file);
 
-                _doc = doc;
+                uint pageCount = _backend.PageCount;
 
                 // ── 自动档位检测：页数 > 100 或首页超大，自动进入弱鸡模式 ──
-                bool autoLowEnd = doc.PageCount > 100;
-                using (var fp0 = doc.GetPage(0))
-                    autoLowEnd |= fp0.Size.Width > 2000 || fp0.Size.Height > 2000;
+                var (p0w, p0h) = _backend.GetPageSize(0);
+                bool autoLowEnd = pageCount > 100 || p0w > 2000 || p0h > 2000;
                 _profile = autoLowEnd ? RenderProfile.LowEnd : RenderProfile.Normal;
                 _layer2Cache = new LruCache<(uint, int), BitmapImage>(_profile.CacheCapacity);
 
@@ -249,17 +213,15 @@ namespace FluentPDF.Pages
                     ? PdfScrollViewer.ActualWidth : ActualWidth;
 
                 float initialZoom = 1.0f;
-                using (var fp = doc.GetPage(0))
+                if (viewportWidth > 0 && p0w > 0)
+                    initialZoom = (float)Math.Clamp(viewportWidth / p0w, ZoomMin, _profile.MaxZoom);
+
+                _pages.Add(new PdfPageItem
                 {
-                    if (viewportWidth > 0 && fp.Size.Width > 0)
-                        initialZoom = (float)Math.Clamp(viewportWidth / fp.Size.Width, ZoomMin, _profile.MaxZoom);
-                    _pages.Add(new PdfPageItem
-                    {
-                        PageIndex     = 0,
-                        DisplayWidth  = fp.Size.Width,
-                        DisplayHeight = fp.Size.Height,
-                    });
-                }
+                    PageIndex     = 0,
+                    DisplayWidth  = p0w,
+                    DisplayHeight = p0h,
+                });
 
                 LoadingRing.IsActive       = false;
                 PdfScrollViewer.Visibility = Visibility.Visible;
@@ -280,10 +242,10 @@ namespace FluentPDF.Pages
 
                 // 后台补全剩余页元数据，不 await——让 Layer1 立即启动，
                 // 元数据任务自己在完成后调 ResumeBackgroundLayer1 补一次。
-                if (doc.PageCount > 1)
+                if (pageCount > 1)
                 {
                     _metaCts = new CancellationTokenSource();
-                    _ = LoadRemainingMetaAsync(doc, _metaCts.Token);
+                    _ = LoadRemainingMetaAsync(pageCount, _metaCts.Token);
                 }
 
                 // 立即启动后台 Layer1 缩略图渲染（不等元数据全部到位）
@@ -302,25 +264,25 @@ namespace FluentPDF.Pages
         }
 
         // 串行读取剩余页的尺寸元数据。
-        // WinRT PdfDocument.GetPage() 绑定在 UI 线程的 STA 上，不能跨线程并发调用。
+        // WindowsPdfBackend.GetPageSize() 内部调用 WinRT GetPage()，必须在 UI 线程执行。
         // 按批次写入 _pages，每批通过低优先级 RunAsync 让出 UI 线程，完成后补一次 Layer1。
-        private async Task LoadRemainingMetaAsync(PdfDocument doc, CancellationToken token)
+        private async Task LoadRemainingMetaAsync(uint pageCount, CancellationToken token)
         {
             const int batchSize = 20;
             var batch = new List<PdfPageItem>(batchSize);
 
-            for (uint i = 1; i < doc.PageCount; i++)
+            for (uint i = 1; i < pageCount; i++)
             {
                 if (token.IsCancellationRequested) return;
-                using PdfPage page = doc.GetPage(i);
+                var (w, h) = _backend.GetPageSize(i);
                 batch.Add(new PdfPageItem
                 {
                     PageIndex     = i,
-                    DisplayWidth  = page.Size.Width,
-                    DisplayHeight = page.Size.Height,
+                    DisplayWidth  = w,
+                    DisplayHeight = h,
                 });
 
-                if (batch.Count >= batchSize || i == doc.PageCount - 1)
+                if (batch.Count >= batchSize || i == pageCount - 1)
                 {
                     var toAdd = batch.ToArray(); batch.Clear();
                     await Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Low, () =>
@@ -350,7 +312,7 @@ namespace FluentPDF.Pages
         /// </summary>
         private async Task RenderLayer1Async(CancellationToken token)
         {
-            if (_doc == null) return;
+            if (_backend.PageCount == 0) return;
 
             var order = BuildLayer1Order();
 
@@ -363,24 +325,14 @@ namespace FluentPDF.Pages
 
                 try
                 {
-                    using PdfPage page = _doc.GetPage(i);
-                    double aspect = page.Size.Height / page.Size.Width;
+                    var (pw, ph) = _backend.GetPageSize(i);
+                    double aspect = ph / pw;
                     uint w = Layer1Width;
                     uint h = (uint)Math.Max(1, Math.Round(w * aspect));
 
-                    var opts = new PdfPageRenderOptions { DestinationWidth = w, DestinationHeight = h };
-                    BitmapImage bitmap;
-                    var stream = _streamPool.Rent();
-                    try
-                    {
-                        await page.RenderToStreamAsync(stream, opts);
-                        if (token.IsCancellationRequested) { _streamPool.Return(stream); return; }
-                        bitmap = new BitmapImage();
-                        stream.Seek(0);
-                        await bitmap.SetSourceAsync(stream);
-                    }
-                    finally { _streamPool.Return(stream); }
+                    var bitmap = await _backend.RenderPageAsync(i, w, h, token);
                     if (token.IsCancellationRequested) return;
+                    if (bitmap == null) continue;
 
                     _layer1Cache[i] = bitmap;
                     if (i < (uint)_pages.Count)
@@ -396,12 +348,12 @@ namespace FluentPDF.Pages
         private List<uint> BuildLayer1Order()
         {
             var (first, last) = GetVisibleRange();
-            var order = new List<uint>((int)(_doc?.PageCount ?? 0));
+            var order = new List<uint>((int)_backend.PageCount);
             // 可见页先加
             for (uint i = (uint)Math.Max(0, first); i <= (uint)Math.Min(_pages.Count - 1, last); i++)
                 order.Add(i);
             // 其余页按页码顺序
-            for (uint i = 0; i < (_doc?.PageCount ?? 0); i++)
+            for (uint i = 0; i < _backend.PageCount; i++)
                 if (i < (uint)Math.Max(0, first) || i > (uint)Math.Min(_pages.Count - 1, last))
                     order.Add(i);
             return order;
@@ -552,7 +504,7 @@ namespace FluentPDF.Pages
 
         private void CheckAndPreemptForViewport()
         {
-            if (_doc == null || _pages.Count == 0) return;
+            if (_backend.PageCount == 0 || _pages.Count == 0) return;
             // dirty flag：只有可见页 Layer2 状态可能变化时才扫描，避免每帧 O(n) 遍历
             if (!_viewportLayer2Dirty) return;
 
@@ -591,7 +543,7 @@ namespace FluentPDF.Pages
 
         private async Task RenderLayer2Async(CancellationToken token)
         {
-            if (_doc == null || _pages.Count == 0) return;
+            if (_backend.PageCount == 0 || _pages.Count == 0) return;
 
             var p    = _profile; // 快照，避免渲染中途档位切换导致不一致
             float zoom = PdfScrollViewer.ZoomFactor;
@@ -734,7 +686,6 @@ namespace FluentPDF.Pages
         {
             try
             {
-                using PdfPage page = _doc!.GetPage(item.PageIndex);
                 uint w = AlignTo4((uint)Math.Max(1, Math.Round(item.DisplayWidth  * renderScale)));
                 uint h = AlignTo4((uint)Math.Max(1, Math.Round(item.DisplayHeight * renderScale)));
 
@@ -745,18 +696,7 @@ namespace FluentPDF.Pages
                     h = AlignTo4((uint)Math.Max(1, Math.Round(h * scale)));
                 }
 
-                var opts   = new PdfPageRenderOptions { DestinationWidth = w, DestinationHeight = h };
-                var stream = _streamPool.Rent();
-                try
-                {
-                    await page.RenderToStreamAsync(stream, opts);
-                    if (token.IsCancellationRequested) return null;
-                    var bitmap = new BitmapImage();
-                    stream.Seek(0);
-                    await bitmap.SetSourceAsync(stream);
-                    return token.IsCancellationRequested ? null : bitmap;
-                }
-                finally { _streamPool.Return(stream); }
+                return await _backend.RenderPageAsync(item.PageIndex, w, h, token);
             }
             catch (OperationCanceledException) { return null; }
             catch { return null; }

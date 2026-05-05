@@ -21,9 +21,12 @@
     <GenerateTestArtifacts>False</GenerateTestArtifacts>
     <AppxBundle>Never</AppxBundle>
     <HoursBetweenUpdateChecks>0</HoursBetweenUpdateChecks>
+    <!-- PDFium 接入期间暂时启用，跑通后再评估 AOT 兼容性 -->
+    <DefineConstants>$(DefineConstants);PDFIUM_ENABLED</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Uwp.Controls.SettingsControls" Version="8.2.251219" />
     <PackageReference Include="Microsoft.UI.Xaml" Version="2.8.7" />
+    <PackageReference Include="PDFtoImage" Version="5.2.1" />
   </ItemGroup>
 </Project>
