@@ -186,22 +186,9 @@
                     </muxc:ItemsRepeater.Layout>
                     <muxc:ItemsRepeater.ItemTemplate>
                         <DataTemplate x:DataType="local:PdfPageItem">
-                            <Grid Width="{x:Bind DisplayWidth, Mode=OneWay}"
-                                  Height="{x:Bind DisplayHeight, Mode=OneWay}"
-                                  UseLayoutRounding="True"
-                                  Background="{ThemeResource SystemControlBackgroundBaseLowBrush}">
-                                <!--
-                                    双层渲染架构（从下到上）：
-                                    Layer1: 单页缩略图（中等分辨率，后台预渲染）
-                                    Layer2: 高分辨率图（按需渲染，可见区优先）
-                                    双缓冲：每层都有 Back/Front 两个 Image，切换时无空白帧
-                                -->
-                                <Image Source="{x:Bind Layer1Back,  Mode=OneWay}" Stretch="Fill" UseLayoutRounding="True"/>
-                                <Image Source="{x:Bind Layer1Front, Mode=OneWay}" Stretch="Fill" UseLayoutRounding="True"/>
-                                <Image Source="{x:Bind Layer2Back,  Mode=OneWay}" Stretch="Fill" UseLayoutRounding="True"/>
-                                <Image Source="{x:Bind Layer2Front, Mode=OneWay}" Stretch="Fill" UseLayoutRounding="True"
-                                       Opacity="{x:Bind Layer2Opacity, Mode=OneWay}"/>
-                            </Grid>
+                            <local:PdfPageView
+                                Width="{x:Bind DisplayWidth, Mode=OneWay}"
+                                Height="{x:Bind DisplayHeight, Mode=OneWay}"/>
                         </DataTemplate>
                     </muxc:ItemsRepeater.ItemTemplate>
                 </muxc:ItemsRepeater>

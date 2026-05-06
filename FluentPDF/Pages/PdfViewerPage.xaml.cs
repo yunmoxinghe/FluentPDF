@@ -2,7 +2,6 @@ using FluentPDF.Backends;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -115,12 +114,8 @@ namespace FluentPDF.Pages
             this.InitializeComponent();
             PagesRepeater.ItemsSource = _pages;
             PdfScrollViewer.ViewChanged += OnViewChanged;
-            _pages.CollectionChanged += (_, e) =>
-            {
-                if (e.NewItems == null) return;
-                foreach (PdfPageItem item in e.NewItems)
-                    item.RequestFadeTick = RequestFadeTick;
-            };
+            PagesRepeater.ElementPrepared  += OnElementPrepared;
+            PagesRepeater.ElementClearing  += OnElementClearing;
 
             // 读取屏幕 DPI 缩放比例，用于渲染时对齐物理像素
             var di = Windows.Graphics.Display.DisplayInformation.GetForCurrentView();
@@ -387,30 +382,27 @@ namespace FluentPDF.Pages
             return order;
         }
 
-        // ── 全局淡入 Timer ────────────────────────────────────────
-        // 单个 DispatcherTimer 驱动所有页面的淡入，避免每页一个 timer 的开销。
-        // 只有存在活跃淡入时才运行，完成后自动停止。
-        private DispatcherTimer? _globalFadeTimer;
-        private static readonly TimeSpan FadeInterval = TimeSpan.FromMilliseconds(16);
-
-        internal void RequestFadeTick()
+        // ── ItemsRepeater 元素生命周期 ────────────────────────────
+        // ElementPrepared：ItemsRepeater 把 DataTemplate 实例化（或从回收池取出）后调用，
+        // 此时把 PdfPageView 与对应的 PdfPageItem 关联，让数据模型能直接驱动视图动画。
+        private void OnElementPrepared(Microsoft.UI.Xaml.Controls.ItemsRepeater sender,
+            Microsoft.UI.Xaml.Controls.ItemsRepeaterElementPreparedEventArgs args)
         {
-            if (_globalFadeTimer == null)
-            {
-                _globalFadeTimer = new DispatcherTimer { Interval = FadeInterval };
-                _globalFadeTimer.Tick += OnGlobalFadeTick;
-            }
-            if (!_globalFadeTimer.IsEnabled)
-                _globalFadeTimer.Start();
+            if (args.Element is PdfPageView view && args.Index < _pages.Count)
+                _pages[args.Index].AttachView(view);
         }
 
-        private void OnGlobalFadeTick(object? sender, object e)
+        // ElementClearing：元素被回收前调用，解除关联，避免悬空引用。
+        private void OnElementClearing(Microsoft.UI.Xaml.Controls.ItemsRepeater sender,
+            Microsoft.UI.Xaml.Controls.ItemsRepeaterElementClearingEventArgs args)
         {
-            bool anyActive = false;
-            foreach (var item in _pages)
-                if (item.TickFade()) anyActive = true;
-            if (!anyActive)
-                _globalFadeTimer!.Stop();
+            if (args.Element is PdfPageView view)
+            {
+                foreach (var item in _pages)
+                {
+                    if (item.IsAttachedTo(view)) { item.DetachView(); break; }
+                }
+            }
         }
 
         // ── 缩放控件 ──────────────────────────────────────────────
@@ -870,88 +862,53 @@ namespace FluentPDF.Pages
 
     // ── 数据模型 ──────────────────────────────────────────────────
 
-    public sealed class PdfPageItem : INotifyPropertyChanged
+    public sealed class PdfPageItem
     {
         public uint   PageIndex     { get; set; }
         public double DisplayWidth  { get; set; }
         public double DisplayHeight { get; set; }
 
-        // ── 静态 PropertyChangedEventArgs 缓存 ───────────────────
-        // 避免每次属性变化都 new，减少高频滚动时的 GC 压力
-        private static readonly PropertyChangedEventArgs s_l1BackArgs    = new(nameof(Layer1Back));
-        private static readonly PropertyChangedEventArgs s_l1FrontArgs   = new(nameof(Layer1Front));
-        private static readonly PropertyChangedEventArgs s_l2BackArgs    = new(nameof(Layer2Back));
-        private static readonly PropertyChangedEventArgs s_l2FrontArgs   = new(nameof(Layer2Front));
-        private static readonly PropertyChangedEventArgs s_l2OpacityArgs = new(nameof(Layer2Opacity));
-
-        // ── 双层各自的双缓冲 ──────────────────────────────────────
+        // ── 双层各自的双缓冲（纯数据，不再驱动 Opacity） ─────────
         private BitmapImage? _l1Back,  _l1Front;
         private BitmapImage? _l2Back,  _l2Front;
 
-        public BitmapImage? Layer1Back  { get => _l1Back;  private set { _l1Back  = value; PropertyChanged?.Invoke(this, s_l1BackArgs);  } }
-        public BitmapImage? Layer1Front { get => _l1Front; private set { _l1Front = value; PropertyChanged?.Invoke(this, s_l1FrontArgs); } }
-        public BitmapImage? Layer2Back  { get => _l2Back;  private set { _l2Back  = value; PropertyChanged?.Invoke(this, s_l2BackArgs);  } }
-        public BitmapImage? Layer2Front { get => _l2Front; private set { _l2Front = value; PropertyChanged?.Invoke(this, s_l2FrontArgs); } }
+        // ── 关联的视图控件（由 ItemsRepeater.ElementPrepared 注入） ──
+        // PdfPageItem 只持有弱引用，避免阻止 UI 元素被回收
+        private WeakReference<PdfPageView>? _viewRef;
 
-        // ── Layer2 淡入透明度（绑定到 Layer2Front Image 的 Opacity） ──
-        private double _layer2Opacity = 1.0;
-        public  double Layer2Opacity
+        internal void AttachView(PdfPageView view)
         {
-            get => _layer2Opacity;
-            private set { _layer2Opacity = value; PropertyChanged?.Invoke(this, s_l2OpacityArgs); }
+            _viewRef = new WeakReference<PdfPageView>(view);
+            // 把当前已有的图像同步到新视图（例如 ItemsRepeater 回收再复用时）
+            if (_viewRef.TryGetTarget(out var v))
+            {
+                v.SetLayer1(_l1Back, _l1Front);
+                v.SetLayer2(_l2Back, _l2Front);
+            }
         }
 
-        // ── 淡入状态（由全局 timer 驱动，无需每页一个 timer） ────
-        private double _fadeElapsedMs;
-        private bool   _fading;
-        private const double FadeDurationMs = 150.0;
+        internal void DetachView() => _viewRef = null;
 
-        // 由 PdfViewerPage 注入，用于在 SetLayer2 时启动全局 timer
-        internal Action? RequestFadeTick;
+        internal bool IsAttachedTo(PdfPageView view)
+            => _viewRef != null && _viewRef.TryGetTarget(out var v) && ReferenceEquals(v, view);
 
         public bool HasLayer1     => _l1Front != null;
         public bool IsLayer2Ready => _l2Front != null;
 
         public void SetLayer1(BitmapImage bmp)
         {
-            Layer1Back  = null;
-            Layer1Front = bmp;
+            _l1Back  = null;
+            _l1Front = bmp;
+            if (_viewRef?.TryGetTarget(out var v) == true)
+                v.SetLayer1(null, bmp);
         }
 
         public void SetLayer2(BitmapImage bmp)
         {
-            if (_l2Front != null)
-                Layer2Back = _l2Front;
-            Layer2Front    = bmp;
-            _fadeElapsedMs = 0;
-            _fading        = true;
-            Layer2Opacity  = 0.0;
-            RequestFadeTick?.Invoke(); // 通知全局 timer 启动
-        }
-
-        /// <summary>
-        /// 由全局 DispatcherTimer 每帧调用，推进淡入动画。
-        /// 返回 true 表示仍在淡入中，false 表示已完成。
-        /// </summary>
-        internal bool TickFade()
-        {
-            if (!_fading) return false;
-
-            _fadeElapsedMs += 16.0; // 对应 FadeInterval = 16ms
-
-            if (_fadeElapsedMs >= FadeDurationMs)
-            {
-                _fading       = false;
-                Layer2Opacity = 1.0;
-                Layer2Back    = null; // 淡入完成，释放 Back 缓冲
-                return false;
-            }
-
-            // ease-out cubic：t' = 1 - (1-t)^3
-            double t  = _fadeElapsedMs / FadeDurationMs;
-            double t1 = 1.0 - t;
-            Layer2Opacity = 1.0 - t1 * t1 * t1;
-            return true;
+            _l2Back  = _l2Front;   // 旧图成为 back，保持显示直到淡入完成
+            _l2Front = bmp;
+            if (_viewRef?.TryGetTarget(out var v) == true)
+                v.SetLayer2(_l2Back, bmp);  // 动画在 PdfPageView 里由 Composition 驱动
         }
 
         /// <summary>释放 Layer2，回退到下方的 Layer1 显示。</summary>
@@ -959,18 +916,13 @@ namespace FluentPDF.Pages
         {
             if (_l2Front == null) return;
             if (HasLayer1 || layer1Cache.ContainsKey(PageIndex))
-                ClearLayerImmediate();
+            {
+                _l2Front = null;
+                _l2Back  = null;
+                if (_viewRef?.TryGetTarget(out var v) == true)
+                    v.ClearLayer2();
+            }
         }
-
-        private void ClearLayerImmediate()
-        {
-            _fading       = false;
-            Layer2Opacity = 1.0;
-            Layer2Front   = null;
-            Layer2Back    = null;
-        }
-
-        public event PropertyChangedEventHandler? PropertyChanged;
     }
 
     // ── LRU 缓存 ──────────────────────────────────────────────────

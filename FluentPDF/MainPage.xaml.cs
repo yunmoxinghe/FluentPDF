@@ -8,7 +8,6 @@ using Windows.UI.Core;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Media;
-using Windows.UI.Xaml.Media.Animation;
 using FluentPDF.Pages;
 using TabView = Microsoft.UI.Xaml.Controls.TabView;
 using TabViewItem = Microsoft.UI.Xaml.Controls.TabViewItem;
@@ -22,9 +21,6 @@ namespace FluentPDF
 
         // 标记本次启动是否由文件关联触发（跳过欢迎页）
         private bool _launchedByFile = false;
-
-        // 下一个被添加的标签需要播放入场动画
-        private TabViewItem? _pendingAnimationTab = null;
 
         public MainPage()
         {
@@ -52,80 +48,6 @@ namespace FluentPDF
 
         private static void OnRootThemeChanged(FrameworkElement sender, object args)
             => AppThemeManager.CustomizeTitleBar();
-
-        private void PdfTabView_Loaded(object sender, RoutedEventArgs e)
-        {
-            // 订阅 TabItemsChanged，在新标签加入后播入场动画
-            PdfTabView.TabItemsChanged += PdfTabView_TabItemsChanged;
-        }
-
-        private void PdfTabView_TabItemsChanged(
-            Microsoft.UI.Xaml.Controls.TabView sender,
-            Windows.Foundation.Collections.IVectorChangedEventArgs args)
-        {
-            // 只处理新增操作
-            if (args.CollectionChange != Windows.Foundation.Collections.CollectionChange.ItemInserted)
-                return;
-
-            var insertedIndex = (int)args.Index;
-            if (sender.TabItems[insertedIndex] is not TabViewItem tab || tab != _pendingAnimationTab)
-                return;
-
-            _pendingAnimationTab = null;
-
-            // 此时容器可能还未生成，推到下一帧再取
-            _ = Dispatcher.RunAsync(CoreDispatcherPriority.Low, () =>
-            {
-                var listView = FindDescendant<ListView>(PdfTabView);
-                if (listView?.ContainerFromItem(tab) is UIElement container)
-                    RunSlideInAnimation(container);
-            });
-        }
-
-        private static void RunSlideInAnimation(UIElement container)
-        {
-            container.RenderTransform = new Windows.UI.Xaml.Media.TranslateTransform { X = 40 };
-            container.Opacity = 0;
-
-            var sb = new Storyboard();
-
-            var slideAnim = new DoubleAnimation
-            {
-                From = 40, To = 0,
-                Duration = new Duration(TimeSpan.FromMilliseconds(250)),
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-            };
-            Storyboard.SetTarget(slideAnim, container);
-            Storyboard.SetTargetProperty(slideAnim, "(UIElement.RenderTransform).(TranslateTransform.X)");
-
-            var fadeAnim = new DoubleAnimation
-            {
-                From = 0, To = 1,
-                Duration = new Duration(TimeSpan.FromMilliseconds(200)),
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-            };
-            Storyboard.SetTarget(fadeAnim, container);
-            Storyboard.SetTargetProperty(fadeAnim, "UIElement.Opacity");
-
-            sb.Children.Add(slideAnim);
-            sb.Children.Add(fadeAnim);
-            sb.Completed += (_, _) => container.RenderTransform = null;
-            sb.Begin();
-        }
-
-        /// <summary>在可视树中查找第一个指定类型的后代元素。</summary>
-        private static T? FindDescendant<T>(DependencyObject parent) where T : DependencyObject
-        {
-            int count = VisualTreeHelper.GetChildrenCount(parent);
-            for (int i = 0; i < count; i++)
-            {
-                var child = VisualTreeHelper.GetChild(parent, i);
-                if (child is T target) return target;
-                var result = FindDescendant<T>(child);
-                if (result != null) return result;
-            }
-            return null;
-        }
 
         private void CustomDragRegion_Loaded(object sender, RoutedEventArgs e)
         {
@@ -210,7 +132,6 @@ namespace FluentPDF
                 IsClosable = true,
                 Content = new Pages.SettingsPage()
             };
-            _pendingAnimationTab = tab;
             PdfTabView.TabItems.Add(tab);
             PdfTabView.SelectedItem = tab;
         }
@@ -229,7 +150,6 @@ namespace FluentPDF
                 IsClosable = false,
                 Content = welcome
             };
-            _pendingAnimationTab = tab;
             PdfTabView.TabItems.Add(tab);
             PdfTabView.SelectedItem = tab;
         }
@@ -243,7 +163,6 @@ namespace FluentPDF
                 IsClosable = true
             };
             LoadFileIntoTab(tab, file);
-            _pendingAnimationTab = tab;
             PdfTabView.TabItems.Add(tab);
             PdfTabView.SelectedItem = tab;
 

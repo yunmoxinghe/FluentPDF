@@ -1,0 +1,22 @@
+<UserControl
+    x:Class="FluentPDF.Pages.PdfPageView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        双层渲染架构（从下到上）：
+        Layer1: 单页缩略图（中等分辨率，后台预渲染）
+        Layer2: 高分辨率图（按需渲染，可见区优先）
+        双缓冲：每层都有 Back/Front 两个 Image，切换时无空白帧
+        淡入：Layer2Front 的 Opacity 由 Composition ScalarKeyFrameAnimation 驱动，
+              运行在 DWM 合成线程，不占 UI 线程。
+    -->
+    <Grid x:Name="RootGrid"
+          UseLayoutRounding="True"
+          Background="{ThemeResource SystemControlBackgroundBaseLowBrush}">
+        <Image x:Name="Layer1BackImage"  Stretch="Fill" UseLayoutRounding="True"/>
+        <Image x:Name="Layer1FrontImage" Stretch="Fill" UseLayoutRounding="True"/>
+        <Image x:Name="Layer2BackImage"  Stretch="Fill" UseLayoutRounding="True"/>
+        <Image x:Name="Layer2FrontImage" Stretch="Fill" UseLayoutRounding="True"/>
+    </Grid>
+</UserControl>
