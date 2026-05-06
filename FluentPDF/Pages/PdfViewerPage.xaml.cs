@@ -214,6 +214,7 @@ namespace FluentPDF.Pages
                 LowEndToggle.IsChecked     = IsLowEndMode;
                 ApplySchoolMode(SettingsManager.Instance.SchoolMode);
                 PdfScrollViewer.ChangeView(null, null, initialZoom, disableAnimation: true);
+                UpdatePageIndicator();
 
                 // 等布局走完一帧再渲染，此时 ViewportHeight 已就绪，GetVisibleRange 能拿到正确范围
                 // 避免 Visibility 刚变 Visible 时 ViewportHeight=0 导致 Layer2 直接跳过、出现一帧模糊
@@ -378,6 +379,67 @@ namespace FluentPDF.Pages
             SetProfile(goLowEnd ? RenderProfile.LowEnd : RenderProfile.Normal);
         }
 
+        // ── 页数跳转 ──────────────────────────────────────────────
+
+        /// <summary>更新页码显示框和总页数文本（1-based）。</summary>
+        private void UpdatePageIndicator()
+        {
+            if (_pages.Count == 0) return;
+            var (first, _) = GetVisibleRange();
+            int current = Math.Max(0, first);
+            PageNumberBox.Text  = (current + 1).ToString();
+            TotalPagesText.Text = $"/ {_pages.Count}";
+        }
+
+        /// <summary>跳转到指定页（0-based）。</summary>
+        private void JumpToPage(int pageIndex)
+        {
+            if (_pages.Count == 0) return;
+            pageIndex = Math.Clamp(pageIndex, 0, _pages.Count - 1);
+
+            var tops = GetPageTops();
+            double pageTop = tops[pageIndex] * PdfScrollViewer.ZoomFactor;
+
+            // 水平居中
+            double extentW = PdfScrollViewer.ExtentWidth;
+            double viewW   = PdfScrollViewer.ViewportWidth;
+            double centerH = Math.Max(0, (extentW - viewW) / 2);
+
+            PdfScrollViewer.ChangeView(centerH, pageTop, null, disableAnimation: false);
+        }
+
+        private void PrevPageButton_Click(object sender, RoutedEventArgs e)
+        {
+            var (first, _) = GetVisibleRange();
+            JumpToPage(Math.Max(0, first - 1));
+        }
+
+        private void NextPageButton_Click(object sender, RoutedEventArgs e)
+        {
+            var (_, last) = GetVisibleRange();
+            JumpToPage(Math.Min(_pages.Count - 1, last + 1));
+        }
+
+        private void PageNumberBox_KeyDown(object sender, Windows.UI.Xaml.Input.KeyRoutedEventArgs e)
+        {
+            if (e.Key == Windows.System.VirtualKey.Enter)
+            {
+                CommitPageNumberBox();
+                e.Handled = true;
+            }
+        }
+
+        private void PageNumberBox_LostFocus(object sender, RoutedEventArgs e)
+            => CommitPageNumberBox();
+
+        private void CommitPageNumberBox()
+        {
+            if (int.TryParse(PageNumberBox.Text, out int page))
+                JumpToPage(page - 1);   // 用户输入 1-based，内部 0-based
+            else
+                UpdatePageIndicator();  // 输入非法时恢复原值
+        }
+
         private void ZoomInButton_Click(object sender, RoutedEventArgs e)
         {
             float cur = PdfScrollViewer.ZoomFactor;
@@ -500,6 +562,7 @@ namespace FluentPDF.Pages
             _lastOffsetTimestamp = nowTicks;
 
             CheckAndPreemptForViewport();
+            UpdatePageIndicator();
 
             if (!e.IsIntermediate)
             {
