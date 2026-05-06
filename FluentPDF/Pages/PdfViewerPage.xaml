@@ -131,28 +131,50 @@
         </Grid.RowDefinitions>
 
         <!-- 工具栏（学校模式下移至 Row=2） -->
-        <CommandBar Grid.Row="0"
-                    x:Name="Toolbar"
-                    Visibility="Collapsed"
-                    DefaultLabelPosition="Right"
-                    Background="Transparent"
-                    HorizontalAlignment="Left">
-            <AppBarButton x:Name="ZoomOutButton" Icon="ZoomOut" x:Uid="ZoomOut" Click="ZoomOutButton_Click"/>
-            <AppBarButton x:Name="ZoomInButton"  Icon="ZoomIn"  x:Uid="ZoomIn"  Click="ZoomInButton_Click"/>
-            <AppBarButton x:Name="ZoomFitButton" Label="适合页面大小" Click="ZoomFitButton_Click">
-                <AppBarButton.Icon>
-                    <FontIcon x:Name="ZoomFitIcon" Glyph="&#xEAD6;"/>
-                </AppBarButton.Icon>
-            </AppBarButton>
-            <AppBarSeparator/>
-            <AppBarToggleButton x:Name="LowEndToggle"
-                                x:Uid="LowEndMode"
-                                Click="LowEndToggle_Click">
-                <AppBarToggleButton.Icon>
-                    <FontIcon Glyph="&#xE945;"/>
-                </AppBarToggleButton.Icon>
-            </AppBarToggleButton>
-        </CommandBar>
+        <Grid x:Name="Toolbar"
+              Grid.Row="0"
+              Visibility="Collapsed"
+              Height="48"
+              Background="Transparent">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- 左组（暂留空） -->
+            <StackPanel Grid.Column="0" Orientation="Horizontal"
+                        VerticalAlignment="Center" HorizontalAlignment="Left"/>
+
+            <!-- 中组：缩放控件，真正居中 -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal"
+                        VerticalAlignment="Center" HorizontalAlignment="Center">
+                <AppBarButton x:Name="ZoomOutButton" Icon="ZoomOut" x:Uid="ZoomOut"
+                              Click="ZoomOutButton_Click" Width="40" LabelPosition="Collapsed"/>
+                <AppBarButton x:Name="ZoomInButton"  Icon="ZoomIn"  x:Uid="ZoomIn"
+                              Click="ZoomInButton_Click"  Width="40" LabelPosition="Collapsed"/>
+                <AppBarButton x:Name="ZoomFitButton" Click="ZoomFitButton_Click"
+                              Width="40" LabelPosition="Collapsed">
+                    <AppBarButton.Icon>
+                        <FontIcon x:Name="ZoomFitIcon" Glyph="&#xEAD6;"/>
+                    </AppBarButton.Icon>
+                </AppBarButton>
+            </StackPanel>
+
+            <!-- 右组：模式切换 -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal"
+                        VerticalAlignment="Center" HorizontalAlignment="Right"
+                        Margin="0,0,8,0">
+                <AppBarToggleButton x:Name="LowEndToggle"
+                                    x:Uid="LowEndMode"
+                                    Click="LowEndToggle_Click"
+                                    Width="40" LabelPosition="Collapsed">
+                    <AppBarToggleButton.Icon>
+                        <FontIcon Glyph="&#xE945;"/>
+                    </AppBarToggleButton.Icon>
+                </AppBarToggleButton>
+            </StackPanel>
+        </Grid>
 
         <!-- 工具栏分割线（顶部时在底部，底部时在顶部） -->
         <Border x:Name="ToolbarDivider"

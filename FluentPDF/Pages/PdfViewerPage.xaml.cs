@@ -404,7 +404,6 @@ namespace FluentPDF.Pages
                 // ── 当前：适合页面大小，点击后将切换回适合宽度 ──
                 // 图标和文字显示"下次点击的效果"即适合宽度
                 ZoomFitIcon.Glyph       = "\uEAD6";
-                ZoomFitButton.Label     = "适合宽度";
 
                 // 执行：适合页面大小（完整显示当前页）
                 var (firstVisible, _) = GetVisibleRange();
@@ -429,7 +428,6 @@ namespace FluentPDF.Pages
                 // ── 当前：适合宽度，点击后将切换回适合页面大小 ──
                 // 图标和文字显示"下次点击的效果"即适合页面大小
                 ZoomFitIcon.Glyph       = "\uE9A6";
-                ZoomFitButton.Label     = "适合页面大小";
 
                 // 执行：适合宽度
                 double vw = PdfScrollViewer.ViewportWidth > 0
