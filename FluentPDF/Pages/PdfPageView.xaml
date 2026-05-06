@@ -10,13 +10,22 @@
         双缓冲：每层都有 Back/Front 两个 Image，切换时无空白帧
         淡入：Layer2Front 的 Opacity 由 Composition ScalarKeyFrameAnimation 驱动，
               运行在 DWM 合成线程，不占 UI 线程。
+
+        旋转架构：
+        RootGrid  — 占位层，Width/Height = DisplayWidth/DisplayHeight（旋转后对调的尺寸）
+        InnerGrid — 内容层，Width/Height = 原始宽高，做 RenderTransform 旋转
+                    旋转 90°/270° 后视觉尺寸恰好等于对调后的 DisplayWidth/DisplayHeight
     -->
-    <Grid x:Name="RootGrid"
-          UseLayoutRounding="True"
-          Background="{ThemeResource SystemControlBackgroundBaseLowBrush}">
-        <Image x:Name="Layer1BackImage"  Stretch="Fill" UseLayoutRounding="True"/>
-        <Image x:Name="Layer1FrontImage" Stretch="Fill" UseLayoutRounding="True"/>
-        <Image x:Name="Layer2BackImage"  Stretch="Fill" UseLayoutRounding="True"/>
-        <Image x:Name="Layer2FrontImage" Stretch="Fill" UseLayoutRounding="True"/>
+    <Grid x:Name="RootGrid" Background="Transparent">
+        <Grid x:Name="InnerGrid"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center"
+              UseLayoutRounding="True"
+              Background="{ThemeResource SystemControlBackgroundBaseLowBrush}">
+            <Image x:Name="Layer1BackImage"  Stretch="Fill" UseLayoutRounding="True"/>
+            <Image x:Name="Layer1FrontImage" Stretch="Fill" UseLayoutRounding="True"/>
+            <Image x:Name="Layer2BackImage"  Stretch="Fill" UseLayoutRounding="True"/>
+            <Image x:Name="Layer2FrontImage" Stretch="Fill" UseLayoutRounding="True"/>
+        </Grid>
     </Grid>
 </UserControl>

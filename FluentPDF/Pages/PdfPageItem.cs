@@ -1,5 +1,6 @@
 using FluentPDF.Helpers;
-using System.Collections.Generic;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using Windows.UI.Xaml.Media.Imaging;
 
 namespace FluentPDF.Pages
@@ -8,11 +9,42 @@ namespace FluentPDF.Pages
     /// 单页数据模型。持有双层双缓冲图像，并通过弱引用驱动关联的 <see cref="PdfPageView"/>。
     /// 所有方法必须在 UI 线程调用。
     /// </summary>
-    public sealed class PdfPageItem
+    public sealed class PdfPageItem : INotifyPropertyChanged
     {
-        public uint   PageIndex     { get; set; }
-        public double DisplayWidth  { get; set; }
-        public double DisplayHeight { get; set; }
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        private void Notify([CallerMemberName] string? name = null)
+            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
+        public uint PageIndex { get; set; }
+
+        // ── 原始尺寸（不随旋转变化，用于渲染时计算 bitmap 尺寸） ──
+        public double OriginalWidth  { get; set; }
+        public double OriginalHeight { get; set; }
+
+        // ── 显示尺寸（旋转 90°/270° 时宽高对调，驱动 ItemsRepeater 布局） ──
+        private double _displayWidth;
+        private double _displayHeight;
+
+        public double DisplayWidth
+        {
+            get => _displayWidth;
+            set { if (_displayWidth != value) { _displayWidth = value; Notify(); } }
+        }
+
+        public double DisplayHeight
+        {
+            get => _displayHeight;
+            set { if (_displayHeight != value) { _displayHeight = value; Notify(); } }
+        }
+
+        // ── 旋转角度（0 / 90 / 180 / 270） ───────────────────────
+        private int _rotationDegrees;
+        public int RotationDegrees
+        {
+            get => _rotationDegrees;
+            set { if (_rotationDegrees != value) { _rotationDegrees = value; Notify(); } }
+        }
 
         // ── 双层各自的双缓冲（纯数据，不再驱动 Opacity） ─────────
         private BitmapImage? _l1Back,  _l1Front;
@@ -30,6 +62,7 @@ namespace FluentPDF.Pages
             {
                 v.SetLayer1(_l1Back, _l1Front);
                 v.SetLayer2(_l2Back, _l2Front);
+                v.SetRotation(_rotationDegrees, OriginalWidth, OriginalHeight);
             }
         }
 
@@ -55,6 +88,18 @@ namespace FluentPDF.Pages
             _l2Front = bmp;
             if (_viewRef?.TryGetTarget(out var v) == true)
                 v.SetLayer2(_l2Back, bmp);  // 动画在 PdfPageView 里由 Composition 驱动
+        }
+
+        /// <summary>应用旋转：对调显示宽高，并通知视图更新 RenderTransform。</summary>
+        internal void ApplyRotation(int degrees)
+        {
+            RotationDegrees = degrees;
+            bool sideways = degrees == 90 || degrees == 270;
+            DisplayWidth  = sideways ? OriginalHeight : OriginalWidth;
+            DisplayHeight = sideways ? OriginalWidth  : OriginalHeight;
+
+            if (_viewRef?.TryGetTarget(out var v) == true)
+                v.SetRotation(degrees, OriginalWidth, OriginalHeight);
         }
 
         /// <summary>

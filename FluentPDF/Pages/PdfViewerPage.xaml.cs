@@ -177,6 +177,10 @@ namespace FluentPDF.Pages
             _layer1Cache.Clear();
             _pageTopCache = null;   // 清除页顶坐标缓存，防止旧数据被新文档复用
 
+            // 重置旋转
+            _rotationDegrees = 0;
+            // pages 会被 Clear()，无需逐项重置
+
             try
             {
                 await _backend.LoadAsync(file);
@@ -201,9 +205,11 @@ namespace FluentPDF.Pages
 
                 _pages.Add(new PdfPageItem
                 {
-                    PageIndex     = 0,
-                    DisplayWidth  = p0w,
-                    DisplayHeight = p0h,
+                    PageIndex      = 0,
+                    OriginalWidth  = p0w,
+                    OriginalHeight = p0h,
+                    DisplayWidth   = p0w,
+                    DisplayHeight  = p0h,
                 });
 
                 LoadingRing.IsActive       = false;
@@ -271,9 +277,11 @@ namespace FluentPDF.Pages
                         // 取整，保证 Grid 尺寸是整数逻辑像素
                         _pages.Add(new PdfPageItem
                         {
-                            PageIndex     = i,
-                            DisplayWidth  = Math.Round(w),
-                            DisplayHeight = Math.Round(h),
+                            PageIndex      = i,
+                            OriginalWidth  = Math.Round(w),
+                            OriginalHeight = Math.Round(h),
+                            DisplayWidth   = Math.Round(w),
+                            DisplayHeight  = Math.Round(h),
                         });
                     }
                 });
@@ -381,6 +389,29 @@ namespace FluentPDF.Pages
         {
             bool goLowEnd = LowEndToggle.IsChecked == true;
             SetProfile(goLowEnd ? RenderProfile.LowEnd : RenderProfile.Normal);
+        }
+
+        // ── 页面旋转 ──────────────────────────────────────────────
+        private int _rotationDegrees = 0;
+
+        private void RotateButton_Click(object sender, RoutedEventArgs e)
+        {
+            _rotationDegrees = (_rotationDegrees + 90) % 360;
+            ApplyRotationToAllPages();
+        }
+
+        private void ApplyRotationToAllPages()
+        {
+            // 清缓存：旋转后宽高变了，旧缓存 bitmap 尺寸不匹配
+            _layer2Cache.Clear();
+            _layer1Cache.Clear();
+            _pageTopCache = null;
+
+            foreach (var item in _pages)
+                item.ApplyRotation(_rotationDegrees);
+
+            ScheduleLayer2();
+            StartBackgroundLayer1();
         }
 
         // ── 页数跳转 ──────────────────────────────────────────────

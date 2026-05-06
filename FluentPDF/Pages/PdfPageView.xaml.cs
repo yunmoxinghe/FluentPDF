@@ -79,5 +79,28 @@ namespace FluentPDF.Pages
             Layer2FrontImage.Source = null;
             Layer2BackImage.Source  = null;
         }
+
+        /// <summary>设置旋转角度（0 / 90 / 180 / 270）。</summary>
+        /// <param name="degrees">旋转角度。</param>
+        /// <param name="originalWidth">页面原始宽度（未旋转）。</param>
+        /// <param name="originalHeight">页面原始高度（未旋转）。</param>
+        public void SetRotation(int degrees, double originalWidth, double originalHeight)
+        {
+            if (degrees == 0)
+            {
+                InnerGrid.Width  = double.NaN;
+                InnerGrid.Height = double.NaN;
+                InnerGrid.RenderTransform       = null;
+                InnerGrid.RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);
+            }
+            else
+            {
+                // InnerGrid 固定为原始宽高，旋转后视觉尺寸 = 对调后的 DisplayWidth/DisplayHeight
+                InnerGrid.Width  = originalWidth;
+                InnerGrid.Height = originalHeight;
+                InnerGrid.RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);
+                InnerGrid.RenderTransform = new Windows.UI.Xaml.Media.RotateTransform { Angle = degrees };
+            }
+        }
     }
 }
