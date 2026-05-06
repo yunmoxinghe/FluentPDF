@@ -281,7 +281,11 @@ namespace FluentPDF.Pages
 
             // 元数据全部到位后，补一次 Layer1 确保新增页也被覆盖
             if (!token.IsCancellationRequested)
+            {
                 ResumeBackgroundLayer1();
+                // 刷新工具栏总页数（加载时只有第 0 页，此时才拿到完整 _pages.Count）
+                UpdatePageIndicator();
+            }
         }
 
         // ── 后台 Layer1 渲染 ──────────────────────────────────────
