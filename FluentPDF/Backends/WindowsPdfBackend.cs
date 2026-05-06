@@ -1,5 +1,5 @@
 using System;
-using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.Data.Pdf;
@@ -17,8 +17,9 @@ namespace FluentPDF.Backends
     {
         private PdfDocument? _doc;
 
-        // Stream 对象池：复用 InMemoryRandomAccessStream，减少大块内存分配/释放
-        private readonly Stack<InMemoryRandomAccessStream> _streamPool = new();
+        // Stream 对象池：复用 InMemoryRandomAccessStream，减少大块内存分配/释放。
+        // 使用 ConcurrentStack 保证并发渲染（Normal 模式 BatchSize=2）时的线程安全。
+        private readonly ConcurrentStack<InMemoryRandomAccessStream> _streamPool = new();
         private const int StreamPoolMaxSize = 8;
 
         // ── IPdfBackend ───────────────────────────────────────────
@@ -97,9 +98,8 @@ namespace FluentPDF.Backends
 
         private InMemoryRandomAccessStream RentStream()
         {
-            if (_streamPool.Count > 0)
+            if (_streamPool.TryPop(out var s))
             {
-                var s = _streamPool.Pop();
                 s.Seek(0);
                 s.Size = 0;
                 return s;
@@ -109,6 +109,7 @@ namespace FluentPDF.Backends
 
         private void ReturnStream(InMemoryRandomAccessStream stream)
         {
+            // 超出池容量时直接释放，避免无限增长
             if (_streamPool.Count < StreamPoolMaxSize)
                 _streamPool.Push(stream);
             else
@@ -120,8 +121,8 @@ namespace FluentPDF.Backends
         public void Dispose()
         {
             _doc = null;  // WinRT PdfDocument 不实现 IDisposable，直接置空让 GC 回收
-            while (_streamPool.Count > 0)
-                _streamPool.Pop().Dispose();
+            while (_streamPool.TryPop(out var s))
+                s.Dispose();
         }
     }
 }

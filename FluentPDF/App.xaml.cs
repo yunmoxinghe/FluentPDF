@@ -309,12 +309,21 @@ namespace FluentPDF
 
         private void SaveSettings()
         {
+            // 序列化在调用线程完成（快），写磁盘放到线程池，避免阻塞 UI 线程。
+            // 用局部变量捕获 json 字符串，防止线程池任务读到后续修改的 _settings。
+            string json;
             try
             {
-                string json = JsonSerializer.Serialize(_settings, AppSettingsJsonContext.Default.AppSettings);
-                File.WriteAllText(_settingsFilePath, json);
+                json = JsonSerializer.Serialize(_settings, AppSettingsJsonContext.Default.AppSettings);
             }
-            catch (Exception ex) { Debug.WriteLine($"[SettingsManager] 保存失败: {ex.Message}"); }
+            catch (Exception ex) { Debug.WriteLine($"[SettingsManager] 序列化失败: {ex.Message}"); return; }
+
+            var path = _settingsFilePath;
+            _ = System.Threading.Tasks.Task.Run(() =>
+            {
+                try   { File.WriteAllText(path, json); }
+                catch (Exception ex) { Debug.WriteLine($"[SettingsManager] 保存失败: {ex.Message}"); }
+            });
         }
 
         private AppSettings LoadSettingsFromFile()

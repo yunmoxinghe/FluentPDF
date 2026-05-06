@@ -1,4 +1,5 @@
 using FluentPDF.Backends;
+using FluentPDF.Helpers;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -12,46 +13,6 @@ using Windows.UI.Xaml.Media.Imaging;
 
 namespace FluentPDF.Pages
 {
-    // ── 渲染性能档位 ─────────────────────────────────────────────
-    public sealed class RenderProfile
-    {
-        public string Name { get; init; } = "";
-        public double ResolutionScaleSlow { get; init; }    // 慢速/静止时的分辨率倍率
-        public double ResolutionScaleFast { get; init; }    // 快速滚动时的分辨率倍率
-        public int    PreloadAhead        { get; init; }    // 滚动方向前方预加载页数
-        public int    PreloadBehind       { get; init; }    // 滚动方向后方预加载页数
-        public int    BatchSize           { get; init; }    // 并行渲染批量大小
-        public int    CacheCapacity       { get; init; }    // Layer2 LRU 缓存容量
-        public uint   MaxRenderDim        { get; init; }    // 单边最大渲染像素
-        public double MaxZoom             { get; init; }    // 最大缩放倍率
-
-        public static readonly RenderProfile Normal = new()
-        {
-            Name                 = "标准",
-            ResolutionScaleSlow  = 1.0,
-            ResolutionScaleFast  = 0.5,
-            PreloadAhead         = 4,
-            PreloadBehind        = 2,
-            BatchSize            = 2,
-            CacheCapacity        = 60,
-            MaxRenderDim         = 3000,
-            MaxZoom              = 4.0,
-        };
-
-        public static readonly RenderProfile LowEnd = new()
-        {
-            Name                 = "流畅（低性能设备）",
-            ResolutionScaleSlow  = 1.0,   // 停止后渲染全分辨率
-            ResolutionScaleFast  = 0.5,   // 快速滚动 0.5x
-            PreloadAhead         = 1,     // 只预加载滚动方向下一页
-            PreloadBehind        = 0,     // 反方向不预加载
-            BatchSize            = 1,     // 单任务渲染，避免并发卡死
-            CacheCapacity        = 20,    // 缓存砍到 20 页
-            MaxRenderDim         = 1200,  // 最大 1200px，防止炸
-            MaxZoom              = 2.0,   // 最大缩放 2x
-        };
-    }
-
     // ── Stream 对象池已移入 WindowsPdfBackend，Page 层不再需要 ──
     public sealed partial class PdfViewerPage : Page
     {
@@ -78,7 +39,8 @@ namespace FluentPDF.Pages
         // ── 缓存 ──────────────────────────────────────────────────
         // Layer2 LRU 缓存：容量由档位决定
         private LruCache<(uint, int), BitmapImage> _layer2Cache = new(RenderProfile.Normal.CacheCapacity);
-        private readonly Dictionary<uint, BitmapImage> _layer1Cache = new();
+        // Layer1 缩略图缓存：有容量上限，防止大文件把所有缩略图都留在内存
+        private LruCache<uint, BitmapImage> _layer1Cache = new(RenderProfile.Normal.Layer1CacheCapacity);
 
         // ── 固定常量 ──────────────────────────────────────────────
         private const double ZoomStep   = 0.25;
@@ -132,6 +94,7 @@ namespace FluentPDF.Pages
             _profile = profile;
             // 重建缓存（容量变了）
             _layer2Cache = new LruCache<(uint, int), BitmapImage>(profile.CacheCapacity);
+            _layer1Cache = new LruCache<uint, BitmapImage>(profile.Layer1CacheCapacity);
             // 更新 ScrollViewer 最大缩放
             PdfScrollViewer.MaxZoomFactor = (float)profile.MaxZoom;
             // 如果当前缩放超出新上限，夹回去
@@ -227,6 +190,7 @@ namespace FluentPDF.Pages
                 bool autoLowEnd = pageCount > 100 || p0w > 2000 || p0h > 2000;
                 _profile = autoLowEnd ? RenderProfile.LowEnd : RenderProfile.Normal;
                 _layer2Cache = new LruCache<(uint, int), BitmapImage>(_profile.CacheCapacity);
+                _layer1Cache = new LruCache<uint, BitmapImage>(_profile.Layer1CacheCapacity);
 
                 double viewportWidth = PdfScrollViewer.ActualWidth > 0
                     ? PdfScrollViewer.ActualWidth : ActualWidth;
@@ -285,35 +249,33 @@ namespace FluentPDF.Pages
 
         // 串行读取剩余页的尺寸元数据。
         // WindowsPdfBackend.GetPageSize() 内部调用 WinRT GetPage()，必须在 UI 线程执行。
-        // 按批次写入 _pages，每批通过低优先级 RunAsync 让出 UI 线程，完成后补一次 Layer1。
+        // 整个循环体（含 GetPageSize）都在 RunAsync 里运行，每批让出一次 UI 线程。
         private async Task LoadRemainingMetaAsync(uint pageCount, CancellationToken token)
         {
             const int batchSize = 20;
-            var batch = new List<PdfPageItem>(batchSize);
 
-            for (uint i = 1; i < pageCount; i++)
+            for (uint batchStart = 1; batchStart < pageCount; batchStart += batchSize)
             {
                 if (token.IsCancellationRequested) return;
-                var (w, h) = _backend.GetPageSize(i);
-                // 取整，保证 Grid 尺寸是整数逻辑像素
-                w = Math.Round(w);
-                h = Math.Round(h);
-                batch.Add(new PdfPageItem
-                {
-                    PageIndex     = i,
-                    DisplayWidth  = w,
-                    DisplayHeight = h,
-                });
 
-                if (batch.Count >= batchSize || i == pageCount - 1)
+                uint batchEnd = Math.Min(batchStart + (uint)batchSize, pageCount);
+
+                await Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Low, () =>
                 {
-                    var toAdd = batch.ToArray(); batch.Clear();
-                    await Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Low, () =>
+                    if (token.IsCancellationRequested) return;
+                    for (uint i = batchStart; i < batchEnd; i++)
                     {
-                        if (token.IsCancellationRequested) return;
-                        foreach (var item in toAdd) _pages.Add(item);
-                    });
-                }
+                        // GetPageSize 调用 WinRT GetPage()，必须在 UI 线程
+                        var (w, h) = _backend.GetPageSize(i);
+                        // 取整，保证 Grid 尺寸是整数逻辑像素
+                        _pages.Add(new PdfPageItem
+                        {
+                            PageIndex     = i,
+                            DisplayWidth  = Math.Round(w),
+                            DisplayHeight = Math.Round(h),
+                        });
+                    }
+                });
             }
 
             // 元数据全部到位后，补一次 Layer1 确保新增页也被覆盖
@@ -323,10 +285,13 @@ namespace FluentPDF.Pages
 
         // ── 后台 Layer1 渲染 ──────────────────────────────────────
 
+        // 追踪 Layer1 后台任务，用于判断是否仍在运行
+        private Task? _layer1Task;
+
         private void StartBackgroundLayer1()
         {
             _layer1Cts = new CancellationTokenSource();
-            _ = RenderLayer1Async(_layer1Cts.Token);
+            _layer1Task = RenderLayer1Async(_layer1Cts.Token);
         }
 
         /// <summary>
@@ -342,7 +307,7 @@ namespace FluentPDF.Pages
             foreach (uint i in order)
             {
                 if (token.IsCancellationRequested) return;
-                if (_layer1Cache.ContainsKey(i)) continue;
+                if (_layer1Cache.TryGet(i, out _)) continue;
                 // 已有 Layer2 则跳过
                 if (i < (uint)_pages.Count && _pages[(int)i].IsLayer2Ready) continue;
 
@@ -357,7 +322,7 @@ namespace FluentPDF.Pages
                     if (token.IsCancellationRequested) return;
                     if (bitmap == null) continue;
 
-                    _layer1Cache[i] = bitmap;
+                    _layer1Cache.Put(i, bitmap);
                     if (i < (uint)_pages.Count)
                         _pages[(int)i].SetLayer1(bitmap);
                 }
@@ -760,16 +725,15 @@ namespace FluentPDF.Pages
 
         private void ResumeBackgroundLayer1()
         {
-            if (_layer1Cts != null) return; // 已在运行
+            // 任务仍在运行时不重复启动（用 Task 状态判断，比检查 CTS 是否为 null 更可靠）
+            if (_layer1Task != null && !_layer1Task.IsCompleted) return;
+
             bool needsLayer1 = false;
             for (int i = 0; i < _pages.Count; i++)
                 if (!_pages[i].HasLayer1) { needsLayer1 = true; break; }
 
             if (needsLayer1)
-            {
-                _layer1Cts = new CancellationTokenSource();
-                _ = RenderLayer1Async(_layer1Cts.Token);
-            }
+                StartBackgroundLayer1();
         }
 
         // ── 工具方法 ──────────────────────────────────────────────
@@ -849,7 +813,7 @@ namespace FluentPDF.Pages
         {
             _debounceTimer?.Stop();
             _layer2Cts?.Cancel(); _layer2Cts = null;
-            _layer1Cts?.Cancel(); _layer1Cts = null;
+            _layer1Cts?.Cancel(); _layer1Cts = null; _layer1Task = null;
             _metaCts?.Cancel();   _metaCts   = null;
             // 重置 evict 边界，防止旧文档边界污染新文档的首次渲染
             _lastEvictFrom = -1;
@@ -857,114 +821,6 @@ namespace FluentPDF.Pages
         }
 
         public bool TryGetThumb(uint pageIndex, out BitmapImage? thumb)
-            => _layer1Cache.TryGetValue(pageIndex, out thumb);
-    }
-
-    // ── 数据模型 ──────────────────────────────────────────────────
-
-    public sealed class PdfPageItem
-    {
-        public uint   PageIndex     { get; set; }
-        public double DisplayWidth  { get; set; }
-        public double DisplayHeight { get; set; }
-
-        // ── 双层各自的双缓冲（纯数据，不再驱动 Opacity） ─────────
-        private BitmapImage? _l1Back,  _l1Front;
-        private BitmapImage? _l2Back,  _l2Front;
-
-        // ── 关联的视图控件（由 ItemsRepeater.ElementPrepared 注入） ──
-        // PdfPageItem 只持有弱引用，避免阻止 UI 元素被回收
-        private WeakReference<PdfPageView>? _viewRef;
-
-        internal void AttachView(PdfPageView view)
-        {
-            _viewRef = new WeakReference<PdfPageView>(view);
-            // 把当前已有的图像同步到新视图（例如 ItemsRepeater 回收再复用时）
-            if (_viewRef.TryGetTarget(out var v))
-            {
-                v.SetLayer1(_l1Back, _l1Front);
-                v.SetLayer2(_l2Back, _l2Front);
-            }
-        }
-
-        internal void DetachView() => _viewRef = null;
-
-        internal bool IsAttachedTo(PdfPageView view)
-            => _viewRef != null && _viewRef.TryGetTarget(out var v) && ReferenceEquals(v, view);
-
-        public bool HasLayer1     => _l1Front != null;
-        public bool IsLayer2Ready => _l2Front != null;
-
-        public void SetLayer1(BitmapImage bmp)
-        {
-            _l1Back  = null;
-            _l1Front = bmp;
-            if (_viewRef?.TryGetTarget(out var v) == true)
-                v.SetLayer1(null, bmp);
-        }
-
-        public void SetLayer2(BitmapImage bmp)
-        {
-            _l2Back  = _l2Front;   // 旧图成为 back，保持显示直到淡入完成
-            _l2Front = bmp;
-            if (_viewRef?.TryGetTarget(out var v) == true)
-                v.SetLayer2(_l2Back, bmp);  // 动画在 PdfPageView 里由 Composition 驱动
-        }
-
-        /// <summary>释放 Layer2，回退到下方的 Layer1 显示。</summary>
-        public void EvictLayer2(Dictionary<uint, BitmapImage> layer1Cache)
-        {
-            if (_l2Front == null) return;
-            if (HasLayer1 || layer1Cache.ContainsKey(PageIndex))
-            {
-                _l2Front = null;
-                _l2Back  = null;
-                if (_viewRef?.TryGetTarget(out var v) == true)
-                    v.ClearLayer2();
-            }
-        }
-    }
-
-    // ── LRU 缓存 ──────────────────────────────────────────────────
-
-    internal sealed class LruCache<TKey, TValue> where TKey : notnull
-    {
-        private readonly int _capacity;
-        private readonly Dictionary<TKey, LinkedListNode<(TKey key, TValue value)>> _map;
-        private readonly LinkedList<(TKey key, TValue value)> _list;
-
-        public LruCache(int capacity)
-        {
-            _capacity = capacity;
-            _map  = new Dictionary<TKey, LinkedListNode<(TKey, TValue)>>(capacity);
-            _list = new LinkedList<(TKey, TValue)>();
-        }
-
-        public bool TryGet(TKey key, out TValue? value)
-        {
-            if (_map.TryGetValue(key, out var node))
-            {
-                _list.Remove(node); _list.AddFirst(node);
-                value = node.Value.value; return true;
-            }
-            value = default; return false;
-        }
-
-        public void Put(TKey key, TValue value)
-        {
-            if (_map.TryGetValue(key, out var existing))
-            {
-                _list.Remove(existing); _map.Remove(key);
-            }
-            else if (_map.Count >= _capacity)
-            {
-                var last = _list.Last!;
-                _map.Remove(last.Value.key); _list.RemoveLast();
-            }
-            var node = _list.AddFirst((key, value));
-            _map[key] = node;
-        }
-
-        public void Clear() { _map.Clear(); _list.Clear(); }
+            => _layer1Cache.TryGet(pageIndex, out thumb);
     }
 }
