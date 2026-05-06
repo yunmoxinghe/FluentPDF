@@ -68,6 +68,7 @@ namespace FluentPDF.Pages
         // ── 适合模式切换 ──────────────────────────────────────────
         // false = 适合宽度（默认），true = 适合页面大小
         private bool _fitPageMode = false;
+        private bool _isCatalogPaneVisible = false;
         private StorageFile? _pendingFile;
         private StorageFile? _lastFile;   // 记录最后一次成功加载的文件，切换后端时重新加载用
 
@@ -75,6 +76,7 @@ namespace FluentPDF.Pages
         {
             this.InitializeComponent();
             PagesRepeater.ItemsSource = _pages;
+            ThumbnailsRepeater.ItemsSource = _pages;
             PdfScrollViewer.ViewChanged += OnViewChanged;
             PagesRepeater.ElementPrepared  += OnElementPrepared;
             PagesRepeater.ElementClearing  += OnElementClearing;
@@ -173,6 +175,7 @@ namespace FluentPDF.Pages
 
             CancelAll();
             _pages.Clear();
+            SetCatalogPaneVisible(false);
             _layer2Cache.Clear();
             _layer1Cache.Clear();
             _pageTopCache = null;   // 清除页顶坐标缓存，防止旧数据被新文档复用
@@ -391,6 +394,53 @@ namespace FluentPDF.Pages
             SetProfile(goLowEnd ? RenderProfile.LowEnd : RenderProfile.Normal);
         }
 
+        // ── 缩略图目录 ───────────────────────────────────────────
+
+        private void CatalogButton_Click(object sender, RoutedEventArgs e)
+            => SetCatalogPaneVisible(CatalogButton.IsChecked == true);
+
+        private void SetCatalogPaneVisible(bool visible)
+        {
+            _isCatalogPaneVisible = visible;
+            CatalogSplitView.IsPaneOpen = visible;
+            CatalogButton.IsChecked = visible;
+
+            if (visible)
+                SyncThumbnailSelection(scrollIntoView: true);
+        }
+
+        private void CatalogSplitView_PaneOpened(object sender, object args)
+            => SyncCatalogPaneState(true);
+
+        private void CatalogSplitView_PaneClosed(object sender, object args)
+            => SyncCatalogPaneState(false);
+
+        private void SyncCatalogPaneState(bool visible)
+        {
+            _isCatalogPaneVisible = visible;
+            CatalogButton.IsChecked = visible;
+
+            if (visible)
+                SyncThumbnailSelection(scrollIntoView: true);
+        }
+
+        private void ThumbnailButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is FrameworkElement { Tag: uint pageIndex })
+                JumpToPage((int)pageIndex);
+        }
+
+        private void SyncThumbnailSelection(bool scrollIntoView)
+        {
+            if (!CatalogSplitView.IsPaneOpen || _pages.Count == 0) return;
+
+            var (first, _) = GetVisibleRange();
+            int current = Math.Clamp(first, 0, _pages.Count - 1);
+
+            if (scrollIntoView)
+                ThumbnailsRepeater.TryGetElement(current)?.StartBringIntoView();
+        }
+
         // ── 页面旋转 ──────────────────────────────────────────────
         private int _rotationDegrees = 0;
 
@@ -424,6 +474,7 @@ namespace FluentPDF.Pages
             int current = Math.Max(0, first);
             PageNumberBox.Text  = (current + 1).ToString();
             TotalPagesText.Text = $"/ {_pages.Count}";
+            SyncThumbnailSelection(scrollIntoView: false);
         }
 
         /// <summary>跳转到指定页（0-based）。</summary>

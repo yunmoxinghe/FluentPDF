@@ -17,6 +17,7 @@ namespace FluentPDF.Pages
             => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 
         public uint PageIndex { get; set; }
+        public int PageNumber => (int)PageIndex + 1;
 
         // ── 原始尺寸（不随旋转变化，用于渲染时计算 bitmap 尺寸） ──
         public double OriginalWidth  { get; set; }
@@ -50,6 +51,19 @@ namespace FluentPDF.Pages
         private BitmapImage? _l1Back,  _l1Front;
         private BitmapImage? _l2Back,  _l2Front;
 
+        public BitmapImage? Thumbnail
+        {
+            get => _l1Front;
+            private set
+            {
+                if (_l1Front != value)
+                {
+                    _l1Front = value;
+                    Notify();
+                }
+            }
+        }
+
         // ── 关联的视图控件（由 ItemsRepeater.ElementPrepared 注入） ──
         // 持有弱引用，避免阻止 UI 元素被 ItemsRepeater 回收
         private System.WeakReference<PdfPageView>? _viewRef;
@@ -77,7 +91,7 @@ namespace FluentPDF.Pages
         public void SetLayer1(BitmapImage bmp)
         {
             _l1Back  = null;
-            _l1Front = bmp;
+            Thumbnail = bmp;
             if (_viewRef?.TryGetTarget(out var v) == true)
                 v.SetLayer1(null, bmp);
         }

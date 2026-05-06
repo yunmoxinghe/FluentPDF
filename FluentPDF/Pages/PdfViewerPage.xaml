@@ -7,6 +7,30 @@
     Background="Transparent">
 
     <Page.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Default">
+                    <AcrylicBrush x:Key="CatalogPaneAcrylicBrush"
+                                  BackgroundSource="Backdrop"
+                                  TintColor="#202020"
+                                  TintOpacity="0.72"
+                                  TintLuminosityOpacity="0.85"
+                                  FallbackColor="#202020"/>
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Light">
+                    <AcrylicBrush x:Key="CatalogPaneAcrylicBrush"
+                                  BackgroundSource="Backdrop"
+                                  TintColor="#F9F9F9"
+                                  TintOpacity="0.78"
+                                  TintLuminosityOpacity="0.9"
+                                  FallbackColor="#F3F3F3"/>
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="HighContrast">
+                    <SolidColorBrush x:Key="CatalogPaneAcrylicBrush"
+                                     Color="{ThemeResource SystemColorWindowColor}"/>
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+
         <!--
             UWP ScrollViewer 默认模板中的 ScrollingIndicatorStates 状态机
             会在鼠标离开后把滚动条切回细条状 TouchIndicator，导致 Visible 属性失效。
@@ -304,6 +328,7 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        </ResourceDictionary>
     </Page.Resources>
 
     <Grid>
@@ -325,9 +350,19 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <!-- 左组（暂留空） -->
+            <!-- 左组：目录 -->
             <StackPanel Grid.Column="0" Orientation="Horizontal"
-                        VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                        VerticalAlignment="Center" HorizontalAlignment="Left"
+                        Margin="8,0,0,0">
+                <AppBarToggleButton x:Name="CatalogButton"
+                                    Width="40"
+                                    LabelPosition="Collapsed"
+                                    Click="CatalogButton_Click">
+                    <AppBarToggleButton.Icon>
+                        <FontIcon Glyph="&#xE8A4;" />
+                    </AppBarToggleButton.Icon>
+                </AppBarToggleButton>
+            </StackPanel>
 
             <!-- 中组：缩放控件 + 页数跳转，真正居中 -->
             <StackPanel Grid.Column="1" Orientation="Horizontal"
@@ -419,37 +454,96 @@
                 Visibility="{Binding Visibility, ElementName=Toolbar}"
                 Background="{ThemeResource TabViewBorderBrush}"/>
 
-        <!-- 加载进度环 -->
-        <muxc:ProgressRing x:Name="LoadingRing" Grid.Row="1"
-                           IsActive="False" Width="48" Height="48"
-                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        <SplitView x:Name="CatalogSplitView"
+                   Grid.Row="1"
+                   DisplayMode="Overlay"
+                   PanePlacement="Left"
+                   OpenPaneLength="176"
+                   CompactPaneLength="0"
+                   IsPaneOpen="False"
+                   PaneOpened="CatalogSplitView_PaneOpened"
+                   PaneClosed="CatalogSplitView_PaneClosed"
+                   PaneBackground="{ThemeResource CatalogPaneAcrylicBrush}">
+            <SplitView.Pane>
+                <Border BorderThickness="0,0,1,0"
+                        BorderBrush="{ThemeResource TabViewBorderBrush}">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Padding="12">
+                        <muxc:ItemsRepeater x:Name="ThumbnailsRepeater"
+                                            HorizontalAlignment="Stretch">
+                            <muxc:ItemsRepeater.Layout>
+                                <muxc:StackLayout Orientation="Vertical" Spacing="12"/>
+                            </muxc:ItemsRepeater.Layout>
+                            <muxc:ItemsRepeater.ItemTemplate>
+                                <DataTemplate x:DataType="local:PdfPageItem">
+                                    <Button Click="ThumbnailButton_Click"
+                                            Tag="{x:Bind PageIndex, Mode=OneWay}"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Center"
+                                            Padding="0"
+                                            Background="Transparent"
+                                            BorderThickness="0">
+                                        <StackPanel Width="136"
+                                                    Spacing="6"
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Top">
+                                            <Border Width="136"
+                                                    Height="176"
+                                                    BorderThickness="1"
+                                                    BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}"
+                                                    Background="{ThemeResource SystemControlBackgroundBaseLowBrush}">
+                                                <Image Source="{x:Bind Thumbnail, Mode=OneWay}"
+                                                       Stretch="Uniform"/>
+                                            </Border>
+                                            <TextBlock Text="{x:Bind PageNumber, Mode=OneWay}"
+                                                       HorizontalAlignment="Center"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                        </StackPanel>
+                                    </Button>
+                                </DataTemplate>
+                            </muxc:ItemsRepeater.ItemTemplate>
+                        </muxc:ItemsRepeater>
+                    </ScrollViewer>
+                </Border>
+            </SplitView.Pane>
 
-        <!-- PDF 内容 -->
-        <ScrollViewer x:Name="PdfScrollViewer" Grid.Row="1"
-                      Style="{StaticResource AlwaysVisibleScrollViewerStyle}"
-                      Visibility="Collapsed"
-                      VerticalScrollBarVisibility="Visible"
-                      HorizontalScrollBarVisibility="Auto"
-                      ZoomMode="Enabled"
-                      MinZoomFactor="0.25"
-                      MaxZoomFactor="4.0"
-                      IsDeferredScrollingEnabled="False"
-                      SizeChanged="PdfScrollViewer_SizeChanged">
-            <Grid x:Name="PagesHost" HorizontalAlignment="Center">
-                <muxc:ItemsRepeater x:Name="PagesRepeater"
-                                    HorizontalAlignment="Center">
-                    <muxc:ItemsRepeater.Layout>
-                        <muxc:StackLayout Orientation="Vertical" Spacing="16"/>
-                    </muxc:ItemsRepeater.Layout>
-                    <muxc:ItemsRepeater.ItemTemplate>
-                        <DataTemplate x:DataType="local:PdfPageItem">
-                            <local:PdfPageView
-                                Width="{x:Bind DisplayWidth, Mode=OneWay}"
-                                Height="{x:Bind DisplayHeight, Mode=OneWay}"/>
-                        </DataTemplate>
-                    </muxc:ItemsRepeater.ItemTemplate>
-                </muxc:ItemsRepeater>
-            </Grid>
-        </ScrollViewer>
+            <SplitView.Content>
+                <Grid>
+                    <!-- 加载进度环 -->
+                    <muxc:ProgressRing x:Name="LoadingRing"
+                                       IsActive="False" Width="48" Height="48"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+                    <!-- PDF 内容 -->
+                    <ScrollViewer x:Name="PdfScrollViewer"
+                                  Style="{StaticResource AlwaysVisibleScrollViewerStyle}"
+                                  Visibility="Collapsed"
+                                  VerticalScrollBarVisibility="Visible"
+                                  HorizontalScrollBarVisibility="Auto"
+                                  ZoomMode="Enabled"
+                                  MinZoomFactor="0.25"
+                                  MaxZoomFactor="4.0"
+                                  IsDeferredScrollingEnabled="False"
+                                  SizeChanged="PdfScrollViewer_SizeChanged">
+                        <Grid x:Name="PagesHost" HorizontalAlignment="Center">
+                            <muxc:ItemsRepeater x:Name="PagesRepeater"
+                                                HorizontalAlignment="Center">
+                                <muxc:ItemsRepeater.Layout>
+                                    <muxc:StackLayout Orientation="Vertical" Spacing="16"/>
+                                </muxc:ItemsRepeater.Layout>
+                                <muxc:ItemsRepeater.ItemTemplate>
+                                    <DataTemplate x:DataType="local:PdfPageItem">
+                                        <local:PdfPageView
+                                            Width="{x:Bind DisplayWidth, Mode=OneWay}"
+                                            Height="{x:Bind DisplayHeight, Mode=OneWay}"/>
+                                    </DataTemplate>
+                                </muxc:ItemsRepeater.ItemTemplate>
+                            </muxc:ItemsRepeater>
+                        </Grid>
+                    </ScrollViewer>
+                </Grid>
+            </SplitView.Content>
+        </SplitView>
     </Grid>
 </Page>
