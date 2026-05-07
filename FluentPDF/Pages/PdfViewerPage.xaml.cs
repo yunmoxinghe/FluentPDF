@@ -69,8 +69,14 @@ namespace FluentPDF.Pages
         // false = 适合宽度（默认），true = 适合页面大小
         private bool _fitPageMode = false;
         private bool _isCatalogPaneVisible = false;
+        private bool _isResizingCatalogPane = false;
+        private double _catalogPaneResizeStartX;
+        private double _catalogPaneResizeStartWidth;
+        private double _catalogPaneWidth = 176;
         private StorageFile? _pendingFile;
         private StorageFile? _lastFile;   // 记录最后一次成功加载的文件，切换后端时重新加载用
+        private const double CatalogPaneMinWidth = 144;
+        private const double CatalogPaneMaxWidth = 360;
 
         public PdfViewerPage()
         {
@@ -402,26 +408,78 @@ namespace FluentPDF.Pages
         private void SetCatalogPaneVisible(bool visible)
         {
             _isCatalogPaneVisible = visible;
-            CatalogSplitView.IsPaneOpen = visible;
             CatalogButton.IsChecked = visible;
+            CatalogSplitView.OpenPaneLength = _catalogPaneWidth;
+            CatalogSplitView.IsPaneOpen = visible;
 
             if (visible)
                 SyncThumbnailSelection(scrollIntoView: true);
         }
 
         private void CatalogSplitView_PaneOpened(object sender, object args)
-            => SyncCatalogPaneState(true);
+        {
+            _isCatalogPaneVisible = true;
+            CatalogButton.IsChecked = true;
+            SyncThumbnailSelection(scrollIntoView: true);
+        }
 
         private void CatalogSplitView_PaneClosed(object sender, object args)
-            => SyncCatalogPaneState(false);
-
-        private void SyncCatalogPaneState(bool visible)
         {
-            _isCatalogPaneVisible = visible;
-            CatalogButton.IsChecked = visible;
+            _isCatalogPaneVisible = false;
+            CatalogButton.IsChecked = false;
+        }
 
-            if (visible)
-                SyncThumbnailSelection(scrollIntoView: true);
+        private void CatalogPaneResizeGrip_PointerPressed(object sender, Windows.UI.Xaml.Input.PointerRoutedEventArgs e)
+        {
+            _isResizingCatalogPane = true;
+            _catalogPaneResizeStartX = e.GetCurrentPoint(this).Position.X;
+            _catalogPaneResizeStartWidth = CatalogSplitView.OpenPaneLength;
+            CatalogPaneResizeGripIndicator.Opacity = 1;
+            CatalogPaneResizeGrip.CapturePointer(e.Pointer);
+            e.Handled = true;
+        }
+
+        private void CatalogPaneResizeGrip_PointerMoved(object sender, Windows.UI.Xaml.Input.PointerRoutedEventArgs e)
+        {
+            if (!_isResizingCatalogPane) return;
+
+            double currentX = e.GetCurrentPoint(this).Position.X;
+            double width = Math.Clamp(
+                _catalogPaneResizeStartWidth + currentX - _catalogPaneResizeStartX,
+                CatalogPaneMinWidth,
+                GetCatalogPaneMaxWidth());
+            _catalogPaneWidth = width;
+            CatalogSplitView.OpenPaneLength = width;
+            e.Handled = true;
+        }
+
+        private void CatalogPaneResizeGrip_PointerReleased(object sender, Windows.UI.Xaml.Input.PointerRoutedEventArgs e)
+        {
+            if (!_isResizingCatalogPane) return;
+
+            _isResizingCatalogPane = false;
+            CatalogPaneResizeGripIndicator.Opacity = 0;
+            CatalogPaneResizeGrip.ReleasePointerCapture(e.Pointer);
+            SyncThumbnailSelection(scrollIntoView: true);
+            e.Handled = true;
+        }
+
+        private void CatalogPaneResizeGrip_PointerEntered(object sender, Windows.UI.Xaml.Input.PointerRoutedEventArgs e)
+        {
+            if (!_isResizingCatalogPane)
+                CatalogPaneResizeGripIndicator.Opacity = 0.6;
+        }
+
+        private void CatalogPaneResizeGrip_PointerExited(object sender, Windows.UI.Xaml.Input.PointerRoutedEventArgs e)
+        {
+            if (!_isResizingCatalogPane)
+                CatalogPaneResizeGripIndicator.Opacity = 0;
+        }
+
+        private double GetCatalogPaneMaxWidth()
+        {
+            double availableWidth = ActualWidth > 0 ? ActualWidth * 0.6 : CatalogPaneMaxWidth;
+            return Math.Max(CatalogPaneMinWidth, Math.Min(CatalogPaneMaxWidth, availableWidth));
         }
 
         private void ThumbnailButton_Click(object sender, RoutedEventArgs e)
@@ -432,7 +490,7 @@ namespace FluentPDF.Pages
 
         private void SyncThumbnailSelection(bool scrollIntoView)
         {
-            if (!CatalogSplitView.IsPaneOpen || _pages.Count == 0) return;
+            if (!_isCatalogPaneVisible || _pages.Count == 0) return;
 
             var (first, _) = GetVisibleRange();
             int current = Math.Clamp(first, 0, _pages.Count - 1);
