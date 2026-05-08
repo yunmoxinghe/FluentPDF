@@ -522,6 +522,16 @@ namespace FluentPDF.Pages
             StartBackgroundLayer1();
         }
 
+        // ── 单页/双页切换 ─────────────────────────────────────────
+        private bool _isDoublePage = false;
+
+        private void PageModeButton_Click(object sender, RoutedEventArgs e)
+        {
+            _isDoublePage = !_isDoublePage;
+            PageModeIcon.Glyph = _isDoublePage ? "\uE89A" : "\uE7C3";
+            // TODO: 在这里添加切换单页/双页视图的逻辑
+        }
+
         // ── 页数跳转 ──────────────────────────────────────────────
 
         /// <summary>更新页码显示框和总页数文本（1-based）。</summary>
