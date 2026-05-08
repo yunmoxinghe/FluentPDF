@@ -14,6 +14,20 @@ using Muxc = Microsoft.UI.Xaml.Controls;
 
 namespace FluentPDF.Pages
 {
+    // ── Bool to Opacity Converter ─────────────────────────────
+    public sealed class BoolToOpacityConverter : Windows.UI.Xaml.Data.IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, string language)
+        {
+            return (value is bool b && b) ? 1.0 : 0.0;
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, string language)
+        {
+            throw new NotImplementedException();
+        }
+    }
+
     // ── Stream 对象池已移入 WindowsPdfBackend，Page 层不再需要 ──
     public sealed partial class PdfViewerPage : Page
     {
@@ -92,6 +106,13 @@ namespace FluentPDF.Pages
             var di = Windows.Graphics.Display.DisplayInformation.GetForCurrentView();
             _dpiScale = di.RawPixelsPerViewPixel;
             di.DpiChanged += (s, _) => _dpiScale = s.RawPixelsPerViewPixel;
+
+            // 初始化目录面板位置（隐藏在左侧）
+            this.Loaded += (s, e) =>
+            {
+                var visual = Windows.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(CatalogPaneContainer);
+                visual.Offset = new System.Numerics.Vector3(-176, 0, 0);
+            };
         }
 
         // ── 公开接口 ──────────────────────────────────────────────
@@ -410,31 +431,62 @@ namespace FluentPDF.Pages
         {
             _isCatalogPaneVisible = visible;
             CatalogButton.IsChecked = visible;
-            CatalogSplitView.OpenPaneLength = _catalogPaneWidth;
-            CatalogSplitView.IsPaneOpen = visible;
+            CatalogPaneContainer.Width = _catalogPaneWidth;
 
             if (visible)
+            {
+                // 显示：先设置 Visibility，然后滑入
+                CatalogPaneContainer.Visibility = Visibility.Visible;
+                AnimateCatalogPaneComposition(0, 200);
                 SyncThumbnailSelection(scrollIntoView: true);
+            }
+            else
+            {
+                // 隐藏：先滑出，然后在动画完成后设置 Visibility
+                AnimateCatalogPaneComposition(-_catalogPaneWidth, 200, () =>
+                {
+                    CatalogPaneContainer.Visibility = Visibility.Collapsed;
+                });
+            }
         }
 
-        private void CatalogSplitView_PaneOpened(object sender, object args)
+        private void AnimateCatalogPaneComposition(double toX, double durationMs, Action? onCompleted = null)
         {
-            _isCatalogPaneVisible = true;
-            CatalogButton.IsChecked = true;
-            SyncThumbnailSelection(scrollIntoView: true);
-        }
+            var visual = Windows.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(CatalogPaneContainer);
+            var compositor = visual.Compositor;
 
-        private void CatalogSplitView_PaneClosed(object sender, object args)
-        {
-            _isCatalogPaneVisible = false;
-            CatalogButton.IsChecked = false;
+            // 创建平移动画
+            var offsetAnimation = compositor.CreateScalarKeyFrameAnimation();
+            offsetAnimation.InsertKeyFrame(1.0f, (float)toX);
+            offsetAnimation.Duration = TimeSpan.FromMilliseconds(durationMs);
+            
+            // 使用 Fluent 标准缓动函数
+            var easingFunction = compositor.CreateCubicBezierEasingFunction(
+                new System.Numerics.Vector2(0.0f, 0.0f),
+                new System.Numerics.Vector2(0.0f, 1.0f)
+            );
+            offsetAnimation.StopBehavior = Windows.UI.Composition.AnimationStopBehavior.SetToFinalValue;
+
+            // 应用动画到 Offset.X
+            var batch = compositor.CreateScopedBatch(Windows.UI.Composition.CompositionBatchTypes.Animation);
+            
+            if (onCompleted != null)
+            {
+                batch.Completed += (s, e) => 
+                {
+                    _ = Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, () => onCompleted());
+                };
+            }
+
+            visual.StartAnimation("Offset.X", offsetAnimation);
+            batch.End();
         }
 
         private void CatalogPaneResizeGrip_PointerPressed(object sender, Windows.UI.Xaml.Input.PointerRoutedEventArgs e)
         {
             _isResizingCatalogPane = true;
             _catalogPaneResizeStartX = e.GetCurrentPoint(this).Position.X;
-            _catalogPaneResizeStartWidth = CatalogSplitView.OpenPaneLength;
+            _catalogPaneResizeStartWidth = CatalogPaneContainer.Width;
             CatalogPaneResizeGripIndicator.Opacity = 1;
             CatalogPaneResizeGrip.CapturePointer(e.Pointer);
             e.Handled = true;
@@ -450,7 +502,7 @@ namespace FluentPDF.Pages
                 CatalogPaneMinWidth,
                 GetCatalogPaneMaxWidth());
             _catalogPaneWidth = width;
-            CatalogSplitView.OpenPaneLength = width;
+            CatalogPaneContainer.Width = width;
             e.Handled = true;
         }
 
@@ -461,6 +513,7 @@ namespace FluentPDF.Pages
             _isResizingCatalogPane = false;
             CatalogPaneResizeGripIndicator.Opacity = 0;
             CatalogPaneResizeGrip.ReleasePointerCapture(e.Pointer);
+            Window.Current.CoreWindow.PointerCursor = new Windows.UI.Core.CoreCursor(Windows.UI.Core.CoreCursorType.Arrow, 1);
             SyncThumbnailSelection(scrollIntoView: true);
             e.Handled = true;
         }
@@ -468,13 +521,19 @@ namespace FluentPDF.Pages
         private void CatalogPaneResizeGrip_PointerEntered(object sender, Windows.UI.Xaml.Input.PointerRoutedEventArgs e)
         {
             if (!_isResizingCatalogPane)
+            {
                 CatalogPaneResizeGripIndicator.Opacity = 0.6;
+                Window.Current.CoreWindow.PointerCursor = new Windows.UI.Core.CoreCursor(Windows.UI.Core.CoreCursorType.SizeWestEast, 1);
+            }
         }
 
         private void CatalogPaneResizeGrip_PointerExited(object sender, Windows.UI.Xaml.Input.PointerRoutedEventArgs e)
         {
             if (!_isResizingCatalogPane)
+            {
                 CatalogPaneResizeGripIndicator.Opacity = 0;
+                Window.Current.CoreWindow.PointerCursor = new Windows.UI.Core.CoreCursor(Windows.UI.Core.CoreCursorType.Arrow, 1);
+            }
         }
 
         private double GetCatalogPaneMaxWidth()
@@ -592,6 +651,13 @@ namespace FluentPDF.Pages
             int current = Math.Max(0, first);
             PageNumberBox.Text  = (current + 1).ToString();
             TotalPagesText.Text = $"/ {_pages.Count}";
+            
+            // 更新目录中的当前页高亮
+            for (int i = 0; i < _pages.Count; i++)
+            {
+                _pages[i].IsCurrentPage = (i == current);
+            }
+            
             SyncThumbnailSelection(scrollIntoView: false);
         }
 

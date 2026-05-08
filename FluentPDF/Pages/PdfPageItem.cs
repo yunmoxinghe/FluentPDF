@@ -19,6 +19,14 @@ namespace FluentPDF.Pages
         public uint PageIndex { get; set; }
         public int PageNumber => (int)PageIndex + 1;
 
+        // ── 是否是当前页（用于目录高亮） ──
+        private bool _isCurrentPage;
+        public bool IsCurrentPage
+        {
+            get => _isCurrentPage;
+            set { if (_isCurrentPage != value) { _isCurrentPage = value; Notify(); } }
+        }
+
         // ── 原始尺寸（不随旋转变化，用于渲染时计算 bitmap 尺寸） ──
         public double OriginalWidth  { get; set; }
         public double OriginalHeight { get; set; }

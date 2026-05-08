@@ -8,6 +8,12 @@
 
     <Page.Resources>
         <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary>
+                    <local:BoolToOpacityConverter x:Key="BoolToOpacityConverter"/>
+                </ResourceDictionary>
+            </ResourceDictionary.MergedDictionaries>
+            
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Default">
                     <AcrylicBrush x:Key="CatalogPaneAcrylicBrush"
@@ -468,83 +474,10 @@
                 Visibility="{Binding Visibility, ElementName=Toolbar}"
                 Background="{ThemeResource TabViewBorderBrush}"/>
 
-        <SplitView x:Name="CatalogSplitView"
-                   Grid.Row="1"
-                   DisplayMode="Overlay"
-                   CompactPaneLength="0"
-                   OpenPaneLength="176"
-                   PanePlacement="Left"
-                   IsPaneOpen="False"
-                   PaneBackground="{ThemeResource CatalogPaneAcrylicBrush}"
-                   PaneClosed="CatalogSplitView_PaneClosed"
-                   PaneOpened="CatalogSplitView_PaneOpened">
-            <SplitView.Pane>
-                <Grid x:Name="CatalogPane">
-                    <Border Margin="0,0,6,0"
-                            BorderThickness="0,0,1,0"
-                            BorderBrush="{ThemeResource TabViewBorderBrush}">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto"
-                                      HorizontalScrollBarVisibility="Disabled"
-                                      Padding="8,0">
-                            <StackPanel Margin="0,20">
-                            <muxc:ItemsRepeater x:Name="ThumbnailsRepeater"
-                                                HorizontalAlignment="Stretch">
-                                <muxc:ItemsRepeater.Layout>
-                                    <muxc:StackLayout Orientation="Vertical" Spacing="12"/>
-                                </muxc:ItemsRepeater.Layout>
-                                <muxc:ItemsRepeater.ItemTemplate>
-                                    <DataTemplate x:DataType="local:PdfPageItem">
-                                        <Button Click="ThumbnailButton_Click"
-                                                Tag="{x:Bind PageIndex, Mode=OneWay}"
-                                                HorizontalAlignment="Stretch"
-                                                HorizontalContentAlignment="Center"
-                                                Padding="0"
-                                                Background="Transparent"
-                                                BorderThickness="0">
-                                            <StackPanel Width="136"
-                                                        Spacing="6"
-                                                        HorizontalAlignment="Center"
-                                                        VerticalAlignment="Top">
-                                                <Border Width="136"
-                                                        Height="176">
-                                                    <Image Source="{x:Bind Thumbnail, Mode=OneWay}"
-                                                           Stretch="Uniform"/>
-                                                </Border>
-                                                <TextBlock Text="{x:Bind PageNumber, Mode=OneWay}"
-                                                           HorizontalAlignment="Center"
-                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                            </StackPanel>
-                                        </Button>
-                                    </DataTemplate>
-                                </muxc:ItemsRepeater.ItemTemplate>
-                            </muxc:ItemsRepeater>
-                            </StackPanel>
-                        </ScrollViewer>
-                    </Border>
-                    <Grid x:Name="CatalogPaneResizeGrip"
-                          Width="12"
-                          HorizontalAlignment="Right"
-                          Background="Transparent"
-                          ToolTipService.ToolTip="调整目录宽度"
-                          AutomationProperties.Name="调整目录宽度"
-                          PointerEntered="CatalogPaneResizeGrip_PointerEntered"
-                          PointerExited="CatalogPaneResizeGrip_PointerExited"
-                          PointerPressed="CatalogPaneResizeGrip_PointerPressed"
-                          PointerMoved="CatalogPaneResizeGrip_PointerMoved"
-                          PointerReleased="CatalogPaneResizeGrip_PointerReleased"
-                          PointerCanceled="CatalogPaneResizeGrip_PointerReleased"
-                          PointerCaptureLost="CatalogPaneResizeGrip_PointerReleased">
-                        <Border x:Name="CatalogPaneResizeGripIndicator"
-                                Width="1"
-                                HorizontalAlignment="Center"
-                                Opacity="0"
-                                Background="{ThemeResource SystemControlForegroundBaseMediumLowBrush}"/>
-                    </Grid>
-                </Grid>
-            </SplitView.Pane>
-
-            <SplitView.Content>
-                <Grid>
+        <!-- PDF 内容区域 -->
+        <Grid Grid.Row="1">
+            <!-- 主内容：PDF 查看器 -->
+            <Grid>
                 <!-- 加载进度环 -->
                 <muxc:ProgressRing x:Name="LoadingRing"
                                    IsActive="False" Width="48" Height="48"
@@ -577,8 +510,114 @@
                         </muxc:ItemsRepeater>
                     </Grid>
                 </ScrollViewer>
+            </Grid>
+
+            <!-- 覆盖层：目录面板 -->
+            <Grid x:Name="CatalogPaneContainer"
+                  Canvas.ZIndex="100"
+                  HorizontalAlignment="Left"
+                  Width="176"
+                  Visibility="Collapsed"
+                  Background="{ThemeResource CatalogPaneAcrylicBrush}">
+                <Grid x:Name="CatalogPane">
+                    <Border BorderThickness="0,0,1,0"
+                            BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      Padding="8,0,12,0">
+                            <StackPanel Margin="0,20">
+                            <muxc:ItemsRepeater x:Name="ThumbnailsRepeater"
+                                                HorizontalAlignment="Stretch">
+                                <muxc:ItemsRepeater.Layout>
+                                    <muxc:StackLayout Orientation="Vertical" Spacing="12"/>
+                                </muxc:ItemsRepeater.Layout>
+                                <muxc:ItemsRepeater.ItemTemplate>
+                                    <DataTemplate x:DataType="local:PdfPageItem">
+                                        <Button Click="ThumbnailButton_Click"
+                                                Tag="{x:Bind PageIndex, Mode=OneWay}"
+                                                HorizontalAlignment="Stretch"
+                                                HorizontalContentAlignment="Center"
+                                                Padding="0"
+                                                Background="Transparent"
+                                                BorderThickness="0">
+                                            <Button.Resources>
+                                                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="Transparent"/>
+                                                <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="Transparent"/>
+                                                <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent"/>
+                                                <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent"/>
+                                            </Button.Resources>
+                                            <StackPanel Width="136"
+                                                        Spacing="6"
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Top">
+                                                <Border x:Name="ThumbnailBorder"
+                                                        BorderThickness="2"
+                                                        CornerRadius="4"
+                                                        HorizontalAlignment="Center">
+                                                    <Border.BorderBrush>
+                                                        <SolidColorBrush x:Name="ThumbnailBorderBrush"
+                                                                         Color="{ThemeResource SystemAccentColor}" 
+                                                                         Opacity="{x:Bind IsCurrentPage, Mode=OneWay, Converter={StaticResource BoolToOpacityConverter}}"/>
+                                                    </Border.BorderBrush>
+                                                    <Image Source="{x:Bind Thumbnail, Mode=OneWay}"
+                                                           MaxWidth="136"
+                                                           MaxHeight="176"
+                                                           Stretch="Uniform"/>
+                                                </Border>
+                                                <TextBlock Text="{x:Bind PageNumber, Mode=OneWay}"
+                                                           HorizontalAlignment="Center"
+                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                            </StackPanel>
+                                            <VisualStateManager.VisualStateGroups>
+                                                <VisualStateGroup x:Name="CommonStates">
+                                                    <VisualState x:Name="Normal"/>
+                                                    <VisualState x:Name="PointerOver">
+                                                        <VisualState.Setters>
+                                                            <Setter Target="ThumbnailBorder.BorderThickness" Value="1"/>
+                                                            <Setter Target="ThumbnailBorderBrush.Opacity" Value="0.5"/>
+                                                        </VisualState.Setters>
+                                                    </VisualState>
+                                                    <VisualState x:Name="Pressed">
+                                                        <VisualState.Setters>
+                                                            <Setter Target="ThumbnailBorder.BorderThickness" Value="1"/>
+                                                            <Setter Target="ThumbnailBorderBrush.Opacity" Value="0.7"/>
+                                                        </VisualState.Setters>
+                                                    </VisualState>
+                                                </VisualStateGroup>
+                                            </VisualStateManager.VisualStateGroups>
+                                        </Button>
+                                    </DataTemplate>
+                                </muxc:ItemsRepeater.ItemTemplate>
+                            </muxc:ItemsRepeater>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Border>
+                    <Grid x:Name="CatalogPaneResizeGrip"
+                          Width="12"
+                          HorizontalAlignment="Right"
+                          Background="Transparent"
+                          ToolTipService.ToolTip="调整目录宽度"
+                          AutomationProperties.Name="调整目录宽度"
+                          PointerEntered="CatalogPaneResizeGrip_PointerEntered"
+                          PointerExited="CatalogPaneResizeGrip_PointerExited"
+                          PointerPressed="CatalogPaneResizeGrip_PointerPressed"
+                          PointerMoved="CatalogPaneResizeGrip_PointerMoved"
+                          PointerReleased="CatalogPaneResizeGrip_PointerReleased"
+                          PointerCanceled="CatalogPaneResizeGrip_PointerReleased"
+                          PointerCaptureLost="CatalogPaneResizeGrip_PointerReleased">
+                        <Grid.Resources>
+                            <ResourceDictionary>
+                                <x:String x:Key="SizeWECursor">SizeWE</x:String>
+                            </ResourceDictionary>
+                        </Grid.Resources>
+                        <Border x:Name="CatalogPaneResizeGripIndicator"
+                                Width="2"
+                                HorizontalAlignment="Right"
+                                Opacity="0"
+                                Background="{ThemeResource SystemControlForegroundBaseMediumLowBrush}"/>
+                    </Grid>
                 </Grid>
-            </SplitView.Content>
-        </SplitView>
+            </Grid>
+        </Grid>
     </Grid>
 </Page>
