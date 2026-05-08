@@ -10,6 +10,7 @@ using Windows.Storage;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Media.Imaging;
+using Muxc = Microsoft.UI.Xaml.Controls;
 
 namespace FluentPDF.Pages
 {
@@ -529,7 +530,53 @@ namespace FluentPDF.Pages
         {
             _isDoublePage = !_isDoublePage;
             PageModeIcon.Glyph = _isDoublePage ? "\uE89A" : "\uE7C3";
-            // TODO: 在这里添加切换单页/双页视图的逻辑
+            ApplyPageMode();
+        }
+
+        private void ApplyPageMode()
+        {
+            if (_isDoublePage)
+            {
+                // 切换到双页模式：使用 UniformGridLayout，每行2列
+                var gridLayout = new Muxc.UniformGridLayout
+                {
+                    MinRowSpacing = 16,
+                    MinColumnSpacing = 16,
+                    MaximumRowsOrColumns = 2  // 每行最多2列
+                };
+                PagesRepeater.Layout = gridLayout;
+            }
+            else
+            {
+                // 切换到单页模式：使用 StackLayout，垂直排列
+                var stackLayout = new Muxc.StackLayout
+                {
+                    Spacing = 16
+                };
+                PagesRepeater.Layout = stackLayout;
+            }
+
+            // 清除缓存（布局变化导致坐标和可见范围都会改变）
+            _pageTopCache = null;
+            _viewportLayer2Dirty = true;
+            
+            // 取消当前的渲染任务
+            _layer2Cts?.Cancel();
+            _layer2Cts = null;
+            
+            // 等待布局完成后再渲染，确保 ItemsRepeater 已经重新布局
+            void OnLayoutUpdated(object? s, object _)
+            {
+                PagesRepeater.LayoutUpdated -= OnLayoutUpdated;
+                // 强制更新可见范围和渲染
+                UpdatePageIndicator();
+                ScheduleLayer2();
+            }
+            PagesRepeater.LayoutUpdated += OnLayoutUpdated;
+            
+            // 强制触发布局更新
+            PagesRepeater.InvalidateMeasure();
+            PagesRepeater.InvalidateArrange();
         }
 
         // ── 页数跳转 ──────────────────────────────────────────────
@@ -565,13 +612,37 @@ namespace FluentPDF.Pages
         private void PrevPageButton_Click(object sender, RoutedEventArgs e)
         {
             var (first, _) = GetVisibleRange();
-            JumpToPage(Math.Max(0, first - 1));
+            if (_isDoublePage)
+            {
+                // 双页模式：跳转到上一对页面（每次跳2页）
+                int targetPage = Math.Max(0, first - 2);
+                // 如果当前在奇数页，跳到前一对的第一页
+                if (first % 2 == 1)
+                    targetPage = Math.Max(0, first - 1);
+                JumpToPage(targetPage);
+            }
+            else
+            {
+                JumpToPage(Math.Max(0, first - 1));
+            }
         }
 
         private void NextPageButton_Click(object sender, RoutedEventArgs e)
         {
             var (_, last) = GetVisibleRange();
-            JumpToPage(Math.Min(_pages.Count - 1, last + 1));
+            if (_isDoublePage)
+            {
+                // 双页模式：跳转到下一对页面（每次跳2页）
+                int targetPage = Math.Min(_pages.Count - 1, last + 1);
+                // 如果last是偶数页（一对的第一页），跳到下一对的第一页
+                if (last % 2 == 0)
+                    targetPage = Math.Min(_pages.Count - 1, last + 2);
+                JumpToPage(targetPage);
+            }
+            else
+            {
+                JumpToPage(Math.Min(_pages.Count - 1, last + 1));
+            }
         }
 
         private void PageNumberBox_KeyDown(object sender, Windows.UI.Xaml.Input.KeyRoutedEventArgs e)
@@ -629,8 +700,18 @@ namespace FluentPDF.Pages
                 double vw = PdfScrollViewer.ViewportWidth  > 0 ? PdfScrollViewer.ViewportWidth  : PdfScrollViewer.ActualWidth;
                 double vh = PdfScrollViewer.ViewportHeight > 0 ? PdfScrollViewer.ViewportHeight : PdfScrollViewer.ActualHeight;
 
-                float fitW = (float)(vw / page.DisplayWidth);
-                float fitH = (float)(vh / page.DisplayHeight);
+                double pageWidth = page.DisplayWidth;
+                double pageHeight = page.DisplayHeight;
+
+                // 双页模式：如果有相邻页面，计算两页的总宽度
+                if (_isDoublePage && targetPage + 1 < _pages.Count)
+                {
+                    pageWidth = page.DisplayWidth + 16 + _pages[targetPage + 1].DisplayWidth; // 16是列间距
+                    pageHeight = Math.Max(page.DisplayHeight, _pages[targetPage + 1].DisplayHeight);
+                }
+
+                float fitW = (float)(vw / pageWidth);
+                float fitH = (float)(vh / pageHeight);
                 float fit  = (float)Math.Clamp(Math.Min(fitW, fitH), ZoomMin, _profile.MaxZoom);
 
                 double extentAfter = PdfScrollViewer.ExtentWidth * (fit / PdfScrollViewer.ZoomFactor);
@@ -649,8 +730,18 @@ namespace FluentPDF.Pages
                 double vw = PdfScrollViewer.ViewportWidth > 0
                     ? PdfScrollViewer.ViewportWidth
                     : PdfScrollViewer.ActualWidth;
+
+                double contentWidth = _pages[0].DisplayWidth;
+
+                // 双页模式：计算两页的总宽度
+                if (_isDoublePage && _pages.Count > 1)
+                {
+                    // 使用前两页的宽度来计算（假设页面宽度相似）
+                    contentWidth = _pages[0].DisplayWidth + 16 + _pages[Math.Min(1, _pages.Count - 1)].DisplayWidth;
+                }
+
                 float fit = (float)Math.Clamp(
-                    vw / _pages[0].DisplayWidth, ZoomMin, _profile.MaxZoom);
+                    vw / contentWidth, ZoomMin, _profile.MaxZoom);
 
                 double ratio       = fit / PdfScrollViewer.ZoomFactor;
                 double extentAfter = PdfScrollViewer.ExtentWidth * ratio;
@@ -957,23 +1048,57 @@ namespace FluentPDF.Pages
         // 每次 _pages 变化后按需重建，GetVisibleRange 用它做 O(log n) 查找。
         private double[]? _pageTopCache;   // 每页顶部 Y（未缩放内容坐标）
         private int       _pageTopCacheVersion = -1;  // 用 int 与 _pages.Count 类型一致
+        private bool      _pageTopCacheIsDoublePage = false;  // 缓存时的页面模式
 
         private double[] GetPageTops()
         {
-            // 用 _pages.Count 作为版本号：页数不变时复用缓存
-            if (_pageTopCache != null && _pageTopCacheVersion == _pages.Count)
+            // 用 _pages.Count 和 _isDoublePage 作为版本号：页数或模式变化时重建缓存
+            if (_pageTopCache != null && _pageTopCacheVersion == _pages.Count && _pageTopCacheIsDoublePage == _isDoublePage)
                 return _pageTopCache;
 
             const double spacing = 16.0;
             var tops = new double[_pages.Count];
-            double y = 0;
-            for (int i = 0; i < _pages.Count; i++)
+
+            if (_isDoublePage)
             {
-                tops[i] = y;
-                y += _pages[i].DisplayHeight + spacing;
+                // 双页模式：每行2页，计算每页的Y坐标
+                double y = 0;
+                for (int i = 0; i < _pages.Count; i++)
+                {
+                    if (i % 2 == 0)
+                    {
+                        // 每行的第一页，记录当前Y
+                        tops[i] = y;
+                    }
+                    else
+                    {
+                        // 每行的第二页，Y坐标与第一页相同
+                        tops[i] = tops[i - 1];
+                        // 计算这一行的最大高度，用于下一行的Y坐标
+                        double maxHeight = Math.Max(_pages[i - 1].DisplayHeight, _pages[i].DisplayHeight);
+                        y = tops[i] + maxHeight + spacing;
+                    }
+                }
+                // 如果最后一页是奇数页（单独一行），需要更新y
+                if (_pages.Count % 2 == 1)
+                {
+                    y = tops[_pages.Count - 1] + _pages[_pages.Count - 1].DisplayHeight + spacing;
+                }
             }
+            else
+            {
+                // 单页模式：垂直堆叠
+                double y = 0;
+                for (int i = 0; i < _pages.Count; i++)
+                {
+                    tops[i] = y;
+                    y += _pages[i].DisplayHeight + spacing;
+                }
+            }
+
             _pageTopCache        = tops;
             _pageTopCacheVersion = _pages.Count;
+            _pageTopCacheIsDoublePage = _isDoublePage;
             return tops;
         }
 
@@ -986,25 +1111,69 @@ namespace FluentPDF.Pages
 
             var tops = GetPageTops();
 
-            // 二分找第一个 bottom >= viewTop 的页（即 top + height >= viewTop）
-            int lo = 0, hi = _pages.Count - 1, first = -1;
-            while (lo <= hi)
+            if (_isDoublePage)
             {
-                int mid = (lo + hi) >> 1;
-                double bottom = tops[mid] + _pages[mid].DisplayHeight;
-                if (bottom >= viewTop) { first = mid; hi = mid - 1; }
-                else lo = mid + 1;
-            }
-            if (first < 0) return (-1, -1);
+                // 双页模式：找到可见的行范围，然后转换为页面范围
+                int firstRow = -1, lastRow = -1;
 
-            // 从 first 向后线性扫到 top > viewBottom（可见页通常只有几页，线性足够）
-            int last = first;
-            for (int i = first + 1; i < _pages.Count; i++)
-            {
-                if (tops[i] > viewBottom) break;
-                last = i;
+                // 二分找第一个可见的行
+                int lo = 0, hi = (_pages.Count + 1) / 2 - 1;
+                while (lo <= hi)
+                {
+                    int midRow = (lo + hi) >> 1;
+                    int pageIdx = midRow * 2;
+                    if (pageIdx >= _pages.Count) break;
+
+                    double rowTop = tops[pageIdx];
+                    double rowHeight = _pages[pageIdx].DisplayHeight;
+                    if (pageIdx + 1 < _pages.Count)
+                        rowHeight = Math.Max(rowHeight, _pages[pageIdx + 1].DisplayHeight);
+                    double rowBottom = rowTop + rowHeight;
+
+                    if (rowBottom >= viewTop) { firstRow = midRow; hi = midRow - 1; }
+                    else lo = midRow + 1;
+                }
+
+                if (firstRow < 0) return (-1, -1);
+
+                // 从 firstRow 向后找最后一个可见的行
+                lastRow = firstRow;
+                for (int row = firstRow + 1; row < (_pages.Count + 1) / 2; row++)
+                {
+                    int pageIdx = row * 2;
+                    if (pageIdx >= _pages.Count) break;
+                    if (tops[pageIdx] > viewBottom) break;
+                    lastRow = row;
+                }
+
+                // 转换行范围为页面范围
+                int first = firstRow * 2;
+                int last = Math.Min(lastRow * 2 + 1, _pages.Count - 1);
+                return (first, last);
             }
-            return (first, last);
+            else
+            {
+                // 单页模式：原有逻辑
+                // 二分找第一个 bottom >= viewTop 的页（即 top + height >= viewTop）
+                int lo = 0, hi = _pages.Count - 1, first = -1;
+                while (lo <= hi)
+                {
+                    int mid = (lo + hi) >> 1;
+                    double bottom = tops[mid] + _pages[mid].DisplayHeight;
+                    if (bottom >= viewTop) { first = mid; hi = mid - 1; }
+                    else lo = mid + 1;
+                }
+                if (first < 0) return (-1, -1);
+
+                // 从 first 向后线性扫到 top > viewBottom（可见页通常只有几页，线性足够）
+                int last = first;
+                for (int i = first + 1; i < _pages.Count; i++)
+                {
+                    if (tops[i] > viewBottom) break;
+                    last = i;
+                }
+                return (first, last);
+            }
         }
 
         // bucket 粒度 0.25：基于已乘 DPI 的 renderScale，
