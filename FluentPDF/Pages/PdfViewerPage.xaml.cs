@@ -529,7 +529,10 @@ namespace FluentPDF.Pages
         private void PageModeButton_Click(object sender, RoutedEventArgs e)
         {
             _isDoublePage = !_isDoublePage;
-            PageModeIcon.Glyph = _isDoublePage ? "\uE89A" : "\uE7C3";
+            // 图标显示"点击后会切换到的模式"，而不是当前模式
+            // 当前是单页时，显示双页图标（提示点击后切换到双页）
+            // 当前是双页时，显示单页图标（提示点击后切换到单页）
+            PageModeIcon.Glyph = _isDoublePage ? "\uE7C3" : "\uE89A";
             ApplyPageMode();
         }
 
