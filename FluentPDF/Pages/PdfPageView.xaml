@@ -26,6 +26,11 @@
             <Image x:Name="Layer1FrontImage" Stretch="Fill" UseLayoutRounding="True"/>
             <Image x:Name="Layer2BackImage"  Stretch="Fill" UseLayoutRounding="True"/>
             <Image x:Name="Layer2FrontImage" Stretch="Fill" UseLayoutRounding="True"/>
+            
+            <!-- 标注层：InkCanvas 覆盖在 PDF 渲染层之上 -->
+            <InkCanvas x:Name="AnnotationCanvas"
+                       HorizontalAlignment="Stretch"
+                       VerticalAlignment="Stretch"/>
         </Grid>
     </Grid>
 </UserControl>

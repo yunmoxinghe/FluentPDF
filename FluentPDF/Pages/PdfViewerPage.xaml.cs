@@ -1,14 +1,19 @@
+using FluentPDF.Annotations;
 using FluentPDF.Backends;
 using FluentPDF.Helpers;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.Storage;
+using Windows.UI.Input.Inking;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
+using Windows.UI.Xaml.Media;
 using Windows.UI.Xaml.Media.Imaging;
 using Muxc = Microsoft.UI.Xaml.Controls;
 
@@ -28,12 +33,72 @@ namespace FluentPDF.Pages
         }
     }
 
+    // ── Bool to Visibility Converter ─────────────────────────────
+    public sealed class BoolToVisibilityConverter : Windows.UI.Xaml.Data.IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, string language)
+        {
+            return (value is bool b && b) ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, string language)
+        {
+            return (value is Visibility v && v == Visibility.Visible);
+        }
+    }
+
     // ── Stream 对象池已移入 WindowsPdfBackend，Page 层不再需要 ──
-    public sealed partial class PdfViewerPage : Page
+    public sealed partial class PdfViewerPage : Page, INotifyPropertyChanged
     {
         private readonly ObservableCollection<PdfPageItem> _pages = new();
         // 渲染后端：默认使用 Windows.Data.Pdf，切换引擎只需换这一行
         private IPdfBackend _backend = new WindowsPdfBackend();
+
+        // ── 标注管理器 ────────────────────────────────────────────
+        private AnnotationManager? _annotationManager;
+        
+        /// <summary>标注管理器实例</summary>
+        public AnnotationManager? AnnotationManager
+        {
+            get => _annotationManager;
+            private set
+            {
+                if (_annotationManager != value)
+                {
+                    // 取消订阅旧实例的事件
+                    if (_annotationManager != null)
+                    {
+                        _annotationManager.UndoRedoStateChanged -= OnUndoRedoStateChanged;
+                    }
+                    
+                    _annotationManager = value;
+                    
+                    // 订阅新实例的事件
+                    if (_annotationManager != null)
+                    {
+                        _annotationManager.UndoRedoStateChanged += OnUndoRedoStateChanged;
+                    }
+                    
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(CanUndo));
+                    OnPropertyChanged(nameof(CanRedo));
+                }
+            }
+        }
+
+        /// <summary>是否可以撤销</summary>
+        public bool CanUndo => _annotationManager?.CanUndo ?? false;
+
+        /// <summary>是否可以重做</summary>
+        public bool CanRedo => _annotationManager?.CanRedo ?? false;
+
+        // ── INotifyPropertyChanged 实现 ───────────────────────────
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        }
 
         /// <summary>当前后端名称，供外部判断是否需要切换，避免重复加载。</summary>
         public string CurrentBackendName => _backend.BackendName;
@@ -113,6 +178,12 @@ namespace FluentPDF.Pages
                 var visual = Windows.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(CatalogPaneContainer);
                 visual.Offset = new System.Numerics.Vector3(-176, 0, 0);
             };
+
+            // 订阅应用程序挂起事件，保存标注数据
+            Windows.ApplicationModel.Core.CoreApplication.Suspending += OnApplicationSuspending;
+            
+            // 订阅页面卸载事件，保存标注数据
+            this.Unloaded += OnPageUnloaded;
         }
 
         // ── 公开接口 ──────────────────────────────────────────────
@@ -201,6 +272,9 @@ namespace FluentPDF.Pages
             PdfScrollViewer.Visibility = Visibility.Collapsed;
             Toolbar.Visibility         = Visibility.Collapsed;
 
+            // 保存并清理之前的标注数据
+            await SaveAndCleanupAnnotationsAsync();
+
             CancelAll();
             _pages.Clear();
             SetCatalogPaneVisible(false);
@@ -216,6 +290,14 @@ namespace FluentPDF.Pages
             {
                 await _backend.LoadAsync(file);
                 uint pageCount = _backend.PageCount;
+
+                // ── 初始化标注管理器 ──
+                // 生成 PDF 文件标识符（使用 SHA256 哈希）
+                string pdfId = AnnotationStorage.GeneratePdfId(file);
+                
+                // 创建并初始化标注管理器
+                AnnotationManager = new AnnotationManager(this);
+                AnnotationManager.Initialize(pdfId, pageCount);
 
                 // ── 自动档位检测：页数 > 100 或首页超大，自动进入弱鸡模式 ──
                 var (p0w, p0h) = _backend.GetPageSize(0);
@@ -397,8 +479,48 @@ namespace FluentPDF.Pages
         private void OnElementPrepared(Microsoft.UI.Xaml.Controls.ItemsRepeater sender,
             Microsoft.UI.Xaml.Controls.ItemsRepeaterElementPreparedEventArgs args)
         {
+            System.Diagnostics.Debug.WriteLine($"[OnElementPrepared] Start - Index: {args.Index}");
+            
             if (args.Element is PdfPageView view && args.Index < _pages.Count)
+            {
                 _pages[args.Index].AttachView(view);
+                System.Diagnostics.Debug.WriteLine($"[OnElementPrepared] AttachView done - Index: {args.Index}");
+
+                // 绑定标注层
+                if (_annotationManager != null)
+                {
+                    uint pageIndex = (uint)args.Index;
+                    
+                    System.Diagnostics.Debug.WriteLine($"[OnElementPrepared] Before AttachInkCanvas - Index: {pageIndex}");
+                    // 将 InkCanvas 与页面标注数据绑定
+                    _annotationManager.AttachInkCanvas(pageIndex, view.InkCanvas);
+                    System.Diagnostics.Debug.WriteLine($"[OnElementPrepared] After AttachInkCanvas - Index: {pageIndex}");
+                    
+                    // 异步加载页面标注数据（不阻塞 UI 线程）
+                    _ = LoadPageAnnotationsAsync(pageIndex);
+                }
+            }
+            
+            System.Diagnostics.Debug.WriteLine($"[OnElementPrepared] End - Index: {args.Index}");
+        }
+
+        /// <summary>
+        /// 异步加载页面标注数据（后台任务，不阻塞 UI）
+        /// </summary>
+        private async Task LoadPageAnnotationsAsync(uint pageIndex)
+        {
+            if (_annotationManager == null)
+                return;
+
+            try
+            {
+                await _annotationManager.LoadPageAsync(pageIndex);
+            }
+            catch (Exception)
+            {
+                // 静默处理加载错误，避免影响 PDF 查看
+                // 错误处理将在后续任务中完善
+            }
         }
 
         // ElementClearing：元素被回收前调用，解除关联，避免悬空引用。
@@ -409,7 +531,19 @@ namespace FluentPDF.Pages
             {
                 foreach (var item in _pages)
                 {
-                    if (item.IsAttachedTo(view)) { item.DetachView(); break; }
+                    if (item.IsAttachedTo(view))
+                    {
+                        item.DetachView();
+                        
+                        // 解除标注层绑定
+                        if (_annotationManager != null)
+                        {
+                            uint pageIndex = (uint)_pages.IndexOf(item);
+                            _annotationManager.DetachInkCanvas(pageIndex);
+                        }
+                        
+                        break;
+                    }
                 }
             }
         }
@@ -426,6 +560,211 @@ namespace FluentPDF.Pages
 
         private void CatalogButton_Click(object sender, RoutedEventArgs e)
             => SetCatalogPaneVisible(CatalogButton.IsChecked == true);
+
+        // ── 撤销/重做 ────────────────────────────────────────────
+
+        private void UndoButton_Click(object sender, RoutedEventArgs e)
+        {
+            _annotationManager?.Undo();
+        }
+
+        private void RedoButton_Click(object sender, RoutedEventArgs e)
+        {
+            _annotationManager?.Redo();
+        }
+
+        // ── 保存标注 ────────────────────────────────────────────
+
+        private async void SaveAnnotationsButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_annotationManager == null)
+                return;
+
+            try
+            {
+                // 显示保存进度
+                SaveAnnotationsButton.IsEnabled = false;
+                
+                // 保存所有标注
+                await _annotationManager.SaveAllAsync();
+                
+                // 显示成功提示
+                var dialog = new ContentDialog
+                {
+                    Title = "保存成功",
+                    Content = "标注已成功保存。",
+                    CloseButtonText = "确定",
+                    XamlRoot = XamlRoot
+                };
+                await dialog.ShowAsync();
+            }
+            catch (Exception ex)
+            {
+                // 显示错误提示
+                var dialog = new ContentDialog
+                {
+                    Title = "保存失败",
+                    Content = $"无法保存标注：{ex.Message}",
+                    CloseButtonText = "确定",
+                    XamlRoot = XamlRoot
+                };
+                await dialog.ShowAsync();
+            }
+            finally
+            {
+                SaveAnnotationsButton.IsEnabled = true;
+            }
+        }
+
+        // ── 另存为 ────────────────────────────────────────────
+
+        private async void SaveAsButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_lastFile == null)
+                return;
+
+            try
+            {
+                // 创建文件保存选择器
+                var savePicker = new Windows.Storage.Pickers.FileSavePicker
+                {
+                    SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
+                    SuggestedFileName = System.IO.Path.GetFileNameWithoutExtension(_lastFile.Name) + "_副本"
+                };
+                savePicker.FileTypeChoices.Add("PDF 文件", new List<string>() { ".pdf" });
+
+                StorageFile file = await savePicker.PickSaveFileAsync();
+                if (file != null)
+                {
+                    SaveAsButton.IsEnabled = false;
+
+                    // 先保存当前标注
+                    if (_annotationManager != null)
+                    {
+                        await _annotationManager.SaveAllAsync();
+                    }
+
+                    // 复制文件
+                    await _lastFile.CopyAndReplaceAsync(file);
+
+                    // 显示成功提示
+                    var dialog = new ContentDialog
+                    {
+                        Title = "另存为成功",
+                        Content = $"文件已保存到：\n{file.Path}",
+                        CloseButtonText = "确定",
+                        XamlRoot = XamlRoot
+                    };
+                    await dialog.ShowAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                var dialog = new ContentDialog
+                {
+                    Title = "另存为失败",
+                    Content = $"无法保存文件：{ex.Message}",
+                    CloseButtonText = "确定",
+                    XamlRoot = XamlRoot
+                };
+                await dialog.ShowAsync();
+            }
+            finally
+            {
+                SaveAsButton.IsEnabled = true;
+            }
+        }
+
+        // ── 全屏 ────────────────────────────────────────────
+
+        private void FullScreenButton_Click(object sender, RoutedEventArgs e)
+        {
+            var view = Windows.UI.ViewManagement.ApplicationView.GetForCurrentView();
+            
+            if (view.IsFullScreenMode)
+            {
+                // 退出全屏
+                view.ExitFullScreenMode();
+                FullScreenButton.Icon = new FontIcon { Glyph = "\uE740" }; // 全屏图标
+                ToolTipService.SetToolTip(FullScreenButton, "全屏 (F11)");
+            }
+            else
+            {
+                // 进入全屏
+                if (view.TryEnterFullScreenMode())
+                {
+                    FullScreenButton.Icon = new FontIcon { Glyph = "\uE73F" }; // 退出全屏图标
+                    ToolTipService.SetToolTip(FullScreenButton, "退出全屏 (F11)");
+                }
+            }
+        }
+
+        // ── 标注工具 ────────────────────────────────────────────
+
+        private void HighlighterButton_Checked(object sender, RoutedEventArgs e)
+        {
+            if (_annotationManager == null)
+                return;
+
+            // 切换到荧光笔工具
+            _annotationManager.SetTool(AnnotationTool.Highlighter);
+            
+            // 从 InkToolbarHighlighterButton 获取当前配置并应用
+            if (sender is InkToolbarHighlighterButton button)
+            {
+                var attributes = button.SelectedBrushIndex >= 0 && button.Palette != null && button.Palette.Count > button.SelectedBrushIndex
+                    ? button.Palette[button.SelectedBrushIndex]
+                    : null;
+                
+                if (attributes is SolidColorBrush solidBrush)
+                {
+                    _annotationManager.SetToolColor(solidBrush.Color);
+                }
+                _annotationManager.SetToolSize(PenTipShape.Rectangle, button.SelectedStrokeWidth);
+            }
+        }
+
+        private void PenButton_Checked(object sender, RoutedEventArgs e)
+        {
+            if (_annotationManager == null)
+                return;
+
+            // 切换到硬笔工具
+            _annotationManager.SetTool(AnnotationTool.Pen);
+            
+            // 从 InkToolbarBallpointPenButton 获取当前配置并应用
+            if (sender is InkToolbarBallpointPenButton button)
+            {
+                var attributes = button.SelectedBrushIndex >= 0 && button.Palette != null && button.Palette.Count > button.SelectedBrushIndex
+                    ? button.Palette[button.SelectedBrushIndex]
+                    : null;
+                
+                if (attributes is SolidColorBrush solidBrush)
+                {
+                    _annotationManager.SetToolColor(solidBrush.Color);
+                }
+                _annotationManager.SetToolSize(PenTipShape.Circle, button.SelectedStrokeWidth);
+            }
+        }
+
+        private void EraserButton_Checked(object sender, RoutedEventArgs e)
+        {
+            if (_annotationManager == null)
+                return;
+
+            // 切换到橡皮擦工具
+            _annotationManager.SetTool(AnnotationTool.Eraser);
+        }
+
+        /// <summary>
+        /// 撤销/重做状态改变事件处理器
+        /// </summary>
+        private void OnUndoRedoStateChanged(object? sender, UndoRedoStateChangedEventArgs e)
+        {
+            // 通知 UI 更新按钮状态
+            OnPropertyChanged(nameof(CanUndo));
+            OnPropertyChanged(nameof(CanRedo));
+        }
 
         private void SetCatalogPaneVisible(bool visible)
         {
@@ -875,6 +1214,11 @@ namespace FluentPDF.Pages
             _lastVerticalOffset  = currentOffset;
             _lastOffsetTimestamp = nowTicks;
 
+            // ── 同步 InkCanvas 缩放 ──────────────────────────────────
+            // 当 ScrollViewer 的 ZoomFactor 改变时，同步更新所有 InkCanvas 的尺寸
+            // InkPresenter 会自动处理笔画的缩放变换
+            SynchronizeInkCanvasZoom();
+
             CheckAndPreemptForViewport();
             UpdatePageIndicator();
 
@@ -892,6 +1236,30 @@ namespace FluentPDF.Pages
                     };
                 }
                 _debounceTimer.Start();
+            }
+        }
+
+        /// <summary>
+        /// 同步所有 InkCanvas 的尺寸以匹配当前缩放级别。
+        /// InkPresenter 会自动处理笔画的缩放变换，保持标注与 PDF 内容对齐。
+        /// </summary>
+        private void SynchronizeInkCanvasZoom()
+        {
+            if (_annotationManager == null || _pages.Count == 0)
+                return;
+
+            // 遍历所有页面，更新已附加的 InkCanvas 尺寸
+            for (int i = 0; i < _pages.Count; i++)
+            {
+                var pageData = _annotationManager.GetPageAnnotation((uint)i);
+                if (pageData?.AttachedCanvas != null)
+                {
+                    var page = _pages[i];
+                    // 更新 InkCanvas 的 Width 和 Height 以匹配当前显示尺寸
+                    // DisplayWidth 和 DisplayHeight 已经考虑了旋转
+                    pageData.AttachedCanvas.Width = page.DisplayWidth;
+                    pageData.AttachedCanvas.Height = page.DisplayHeight;
+                }
             }
         }
 
@@ -1260,6 +1628,89 @@ namespace FluentPDF.Pages
                 if (left >= from) order.Add(left--);
             }
             return order;
+        }
+
+        /// <summary>
+        /// 保存并清理标注数据
+        /// </summary>
+        private async Task SaveAndCleanupAnnotationsAsync()
+        {
+            if (_annotationManager != null)
+            {
+                try
+                {
+                    // 保存所有已修改的标注
+                    await _annotationManager.SaveAllAsync();
+                }
+                catch (Exception ex)
+                {
+                    // 显示错误消息但不阻止清理流程
+                    System.Diagnostics.Debug.WriteLine($"Failed to save annotations: {ex.Message}");
+                    
+                    // 在 UI 线程显示错误对话框
+                    await Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, async () =>
+                    {
+                        try
+                        {
+                            var dialog = new ContentDialog
+                            {
+                                Title = "保存标注失败",
+                                Content = $"无法保存标注数据：{ex.Message}\n\n标注数据可能会丢失。",
+                                CloseButtonText = "确定",
+                                XamlRoot = XamlRoot
+                            };
+                            await dialog.ShowAsync();
+                        }
+                        catch
+                        {
+                            // 忽略对话框显示失败
+                        }
+                    });
+                }
+                finally
+                {
+                    // 无论保存是否成功，都要释放资源
+                    _annotationManager.Dispose();
+                    _annotationManager = null;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 应用程序挂起事件处理器，保存标注数据
+        /// </summary>
+        private async void OnApplicationSuspending(object? sender, Windows.ApplicationModel.SuspendingEventArgs e)
+        {
+            if (_annotationManager != null)
+            {
+                var deferral = e.SuspendingOperation.GetDeferral();
+                try
+                {
+                    // 保存所有已修改的标注
+                    await _annotationManager.SaveAllAsync();
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Failed to save annotations on suspend: {ex.Message}");
+                }
+                finally
+                {
+                    deferral.Complete();
+                }
+            }
+        }
+
+        /// <summary>
+        /// 页面卸载事件处理器，保存标注数据
+        /// </summary>
+        private async void OnPageUnloaded(object sender, RoutedEventArgs e)
+        {
+            // 取消订阅事件
+            Windows.ApplicationModel.Core.CoreApplication.Suspending -= OnApplicationSuspending;
+            this.Unloaded -= OnPageUnloaded;
+
+            // 保存并清理标注数据
+            await SaveAndCleanupAnnotationsAsync();
         }
 
         private void CancelAll()

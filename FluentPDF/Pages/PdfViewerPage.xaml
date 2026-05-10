@@ -3,6 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:FluentPDF.Pages"
+    xmlns:annotations="using:FluentPDF.Annotations"
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
     Background="Transparent">
 
@@ -11,6 +12,7 @@
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary>
                     <local:BoolToOpacityConverter x:Key="BoolToOpacityConverter"/>
+                    <local:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
                 </ResourceDictionary>
             </ResourceDictionary.MergedDictionaries>
             
@@ -334,6 +336,30 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- 荧光笔配置 -->
+        <BrushCollection x:Key="HighlighterPalette">
+            <SolidColorBrush Color="#80FFFF00" /><!-- 黄色 -->
+            <SolidColorBrush Color="#8000FF00" /><!-- 绿色 -->
+            <SolidColorBrush Color="#8000BFFF" /><!-- 蓝色 -->
+            <SolidColorBrush Color="#80FF69B4" /><!-- 粉色 -->
+            <SolidColorBrush Color="#80FFA500" /><!-- 橙色 -->
+            <SolidColorBrush Color="#808A2BE2" /><!-- 紫色 -->
+        </BrushCollection>
+
+        <!-- 硬笔配置 -->
+        <BrushCollection x:Key="PenPalette">
+            <SolidColorBrush Color="#FF000000" /><!-- 黑色 -->
+            <SolidColorBrush Color="#FFFF0000" /><!-- 红色 -->
+            <SolidColorBrush Color="#FF0000FF" /><!-- 蓝色 -->
+            <SolidColorBrush Color="#FF008000" /><!-- 绿色 -->
+            <SolidColorBrush Color="#FFFF8C00" /><!-- 深橙色 -->
+            <SolidColorBrush Color="#FF8A2BE2" /><!-- 紫色 -->
+            <SolidColorBrush Color="#FF8B4513" /><!-- 棕色 -->
+            <SolidColorBrush Color="#FF808080" /><!-- 灰色 -->
+            <SolidColorBrush Color="#FFFFFFFF" /><!-- 白色 -->
+        </BrushCollection>
+
         </ResourceDictionary>
     </Page.Resources>
 
@@ -356,10 +382,10 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <!-- 左组：目录 -->
+            <!-- 左组：目录 + 标注工具 -->
             <StackPanel Grid.Column="0" Orientation="Horizontal"
                         VerticalAlignment="Center" HorizontalAlignment="Left"
-                        Margin="8,0,0,0">
+                        Margin="8,0,0,0" Spacing="4">
                 <AppBarToggleButton x:Name="CatalogButton"
                                     Width="40"
                                     LabelPosition="Collapsed"
@@ -368,6 +394,60 @@
                         <FontIcon Glyph="&#xE8A4;" />
                     </AppBarToggleButton.Icon>
                 </AppBarToggleButton>
+                
+                <!-- 视觉分隔符 -->
+                <Border Width="1" Height="24"
+                        Background="{ThemeResource SystemControlForegroundBaseLowBrush}"
+                        VerticalAlignment="Center"
+                        Margin="4,0"/>
+                
+                <!-- 撤销按钮 -->
+                <AppBarButton x:Name="UndoButton"
+                              Width="40"
+                              LabelPosition="Collapsed"
+                              Visibility="{x:Bind CanUndo, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
+                              ToolTipService.ToolTip="撤销 (Ctrl+Z)"
+                              Click="UndoButton_Click">
+                    <AppBarButton.Icon>
+                        <FontIcon Glyph="&#xE7A7;" />
+                    </AppBarButton.Icon>
+                    <AppBarButton.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="Z" Modifiers="Control" />
+                    </AppBarButton.KeyboardAccelerators>
+                </AppBarButton>
+                
+                <!-- 重做按钮 -->
+                <AppBarButton x:Name="RedoButton"
+                              Width="40"
+                              LabelPosition="Collapsed"
+                              Visibility="{x:Bind CanRedo, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
+                              ToolTipService.ToolTip="重做 (Ctrl+Y)"
+                              Click="RedoButton_Click">
+                    <AppBarButton.Icon>
+                        <FontIcon Glyph="&#xE7A6;" />
+                    </AppBarButton.Icon>
+                    <AppBarButton.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="Y" Modifiers="Control" />
+                    </AppBarButton.KeyboardAccelerators>
+                </AppBarButton>
+                
+                <!-- InkToolbar 水平布局 -->
+                <InkToolbar x:Name="AnnotationInkToolbar"
+                            Orientation="Horizontal"
+                            InitialControls="None"
+                            VerticalAlignment="Center">
+                    <InkToolbarHighlighterButton x:Name="HighlighterButton"
+                                                 ToolTipService.ToolTip="荧光笔"
+                                                 Checked="HighlighterButton_Checked"
+                                                 Palette="{StaticResource HighlighterPalette}" />
+                    <InkToolbarBallpointPenButton x:Name="PenButton"
+                                                  ToolTipService.ToolTip="硬笔"
+                                                  Checked="PenButton_Checked"
+                                                  Palette="{StaticResource PenPalette}" />
+                    <InkToolbarEraserButton x:Name="EraserButton"
+                                            ToolTipService.ToolTip="橡皮擦"
+                                            Checked="EraserButton_Checked" />
+                </InkToolbar>
             </StackPanel>
 
             <!-- 中组：缩放控件 + 页数跳转，真正居中 -->
@@ -451,10 +531,61 @@
                 </AppBarButton>
             </StackPanel>
 
-            <!-- 右组：模式切换 -->
+            <!-- 右组：保存按钮 + 另存为 + 全屏 + 模式切换 -->
             <StackPanel Grid.Column="2" Orientation="Horizontal"
                         VerticalAlignment="Center" HorizontalAlignment="Right"
-                        Margin="0,0,8,0">
+                        Margin="0,0,8,0" Spacing="4">
+                <!-- 保存标注按钮 -->
+                <AppBarButton x:Name="SaveAnnotationsButton"
+                              Width="40"
+                              LabelPosition="Collapsed"
+                              ToolTipService.ToolTip="保存标注 (Ctrl+S)"
+                              Click="SaveAnnotationsButton_Click">
+                    <AppBarButton.Icon>
+                        <FontIcon Glyph="&#xE74E;" />
+                    </AppBarButton.Icon>
+                    <AppBarButton.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="S" Modifiers="Control" />
+                    </AppBarButton.KeyboardAccelerators>
+                </AppBarButton>
+                
+                <!-- 另存为按钮 -->
+                <AppBarButton x:Name="SaveAsButton"
+                              Width="40"
+                              LabelPosition="Collapsed"
+                              ToolTipService.ToolTip="另存为"
+                              Click="SaveAsButton_Click">
+                    <AppBarButton.Icon>
+                        <FontIcon Glyph="&#xE792;" />
+                    </AppBarButton.Icon>
+                </AppBarButton>
+                
+                <!-- 分隔线 -->
+                <Border Width="1" Height="24"
+                        Background="{ThemeResource SystemControlForegroundBaseLowBrush}"
+                        VerticalAlignment="Center"
+                        Margin="4,0"/>
+                
+                <!-- 全屏按钮 -->
+                <AppBarButton x:Name="FullScreenButton"
+                              Width="40"
+                              LabelPosition="Collapsed"
+                              ToolTipService.ToolTip="全屏 (F11)"
+                              Click="FullScreenButton_Click">
+                    <AppBarButton.Icon>
+                        <FontIcon Glyph="&#xE740;" />
+                    </AppBarButton.Icon>
+                    <AppBarButton.KeyboardAccelerators>
+                        <KeyboardAccelerator Key="F11" />
+                    </AppBarButton.KeyboardAccelerators>
+                </AppBarButton>
+                
+                <!-- 分隔线 -->
+                <Border Width="1" Height="24"
+                        Background="{ThemeResource SystemControlForegroundBaseLowBrush}"
+                        VerticalAlignment="Center"
+                        Margin="4,0"/>
+                
                 <AppBarToggleButton x:Name="LowEndToggle"
                                     x:Uid="LowEndMode"
                                     Click="LowEndToggle_Click"

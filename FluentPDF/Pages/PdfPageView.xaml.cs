@@ -4,6 +4,9 @@ using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Hosting;
 using Windows.UI.Xaml.Media.Imaging;
+using Windows.Devices.Input;
+using Windows.UI.Core;
+using FluentPDF.Annotations;
 
 namespace FluentPDF.Pages
 {
@@ -21,6 +24,11 @@ namespace FluentPDF.Pages
         private Compositor?          _compositor;
         private Visual?              _layer2FrontVisual;
         private ScalarKeyFrameAnimation? _fadeInAnim;
+
+        /// <summary>
+        /// 公开 InkCanvas 控件，供外部访问（用于标注功能）
+        /// </summary>
+        public InkCanvas InkCanvas => AnnotationCanvas;
 
         public PdfPageView()
         {
@@ -101,6 +109,48 @@ namespace FluentPDF.Pages
                 InnerGrid.RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);
                 InnerGrid.RenderTransform = new Windows.UI.Xaml.Media.RotateTransform { Angle = degrees };
             }
+        }
+
+        // ── 标注功能 ─────────────────────────────────────────────
+
+        /// <summary>
+        /// 初始化标注画布，配置输入设备和事件订阅
+        /// </summary>
+        /// <param name="annotationData">页面标注数据</param>
+        public void InitializeAnnotationCanvas(PageAnnotationData annotationData)
+        {
+            // 配置 InkPresenter 支持的输入设备类型（鼠标、触控笔、触摸）
+            AnnotationCanvas.InkPresenter.InputDeviceTypes =
+                CoreInputDeviceTypes.Mouse |
+                CoreInputDeviceTypes.Pen |
+                CoreInputDeviceTypes.Touch;
+
+            // 订阅笔画收集事件（用户完成绘制时触发）
+            AnnotationCanvas.InkPresenter.StrokesCollected += OnStrokesCollected;
+
+            // 订阅笔画擦除事件（用户使用橡皮擦时触发）
+            AnnotationCanvas.InkPresenter.StrokesErased += OnStrokesErased;
+
+            // 将 InkCanvas 与页面标注数据绑定
+            annotationData.AttachCanvas(AnnotationCanvas);
+        }
+
+        /// <summary>
+        /// 笔画收集事件处理器（用户完成绘制时触发）
+        /// </summary>
+        private void OnStrokesCollected(Windows.UI.Input.Inking.InkPresenter sender, Windows.UI.Input.Inking.InkStrokesCollectedEventArgs args)
+        {
+            // 事件处理逻辑将由 AnnotationManager 实现
+            // 这里仅作为事件订阅点，实际处理在 PdfViewerPage 中通过 AnnotationManager 完成
+        }
+
+        /// <summary>
+        /// 笔画擦除事件处理器（用户使用橡皮擦时触发）
+        /// </summary>
+        private void OnStrokesErased(Windows.UI.Input.Inking.InkPresenter sender, Windows.UI.Input.Inking.InkStrokesErasedEventArgs args)
+        {
+            // 事件处理逻辑将由 AnnotationManager 实现
+            // 这里仅作为事件订阅点，实际处理在 PdfViewerPage 中通过 AnnotationManager 完成
         }
     }
 }
